@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   PackageSearch,
   Settings,
+  BarChart3,
   Menu,
   LogOut,
   ChevronDown,
@@ -36,6 +37,7 @@ const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard,
   PackageSearch,
   Settings,
+  BarChart3,
 };
 
 function iconFor(name: string): LucideIcon {

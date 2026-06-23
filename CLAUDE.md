@@ -29,6 +29,13 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
   **Náš sklad** se bere z **živého XML feedu** (`STOCK_FEED_URL`, párování dle EANu,
   `src/modules/stock/feed/`) — aktualizace tlačítkem i automaticky při importu;
   produkt mimo feed = 0 ks. XLSX `Stock` je jen fallback, dokud feed neproběhl.
+- **Modul „Obchodní analytika" (klíč `analytics`) — HOTOVO.** Agregační vrstva nad
+  logikou `stock` (žádný nový zdroj/import). Žebříček odběratelů („koho oslovit") +
+  top produkty napříč trhem („co tlačit") + KPI souhrn + trend (porovnání 2 snapshotů).
+  Sdílené pravidlo z `src/modules/stock/rules.ts` (anti-drift) a scope z
+  `src/modules/stock/reseller-scope.ts`. Služba: `src/modules/analytics/aggregate.ts`,
+  stránka `/analytika`, export `/api/analytics/export`. Headline = živý sklad,
+  trend = verzovaný `Product.ourStock` obou snapshotů.
 - **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka, automatický import, produkční hosting,
   další moduly.
 
@@ -108,13 +115,14 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  ├─ app/
 │  │  ├─ (auth)/login/        # přihlášení + server action
 │  │  ├─ (dashboard)/         # layout s navigací dle práv
-│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ (page + actions)
-│  │  └─ api/{auth,stock/export}/
+│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/
+│  │  └─ api/{auth,stock/export,analytics/export}/
 │  ├─ core/
 │  │  ├─ auth/                # auth.config.ts, auth.ts, session.ts, password.ts
-│  │  ├─ modules/             # registry.ts (REGISTR), types.ts, stock/module.ts
+│  │  ├─ modules/             # registry.ts (REGISTR), types.ts, stock/module.ts, analytics/module.ts
 │  │  └─ rbac/                # access.ts (can/assert), permissions.ts
-│  ├─ modules/stock/          # constants, opportunities, import/{parser,import-service}, feed/{feed-parser,feed-service}, components/
+│  ├─ modules/stock/          # constants, opportunities, rules, reseller-scope, import/, feed/, components/
+│  ├─ modules/analytics/      # aggregate (žebříčky + trend), components/
 │  ├─ components/{ui,dashboard}/
 │  ├─ lib/{prisma,utils}.ts
 │  └─ generated/prisma/       # generovaný Prisma klient (mimo git)

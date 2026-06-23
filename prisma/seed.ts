@@ -17,9 +17,21 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   // Admin dostane všechna práva (doplní se dynamicky níže).
   Admin: [],
   // Manažer: vidí data VŠECH odběratelů a může exportovat, bez správy uživatelů.
-  Manažer: ["stock.view", "stock.viewall", "stock.export"],
+  Manažer: [
+    "stock.view",
+    "stock.viewall",
+    "stock.export",
+    "analytics.view",
+    "analytics.viewall",
+    "analytics.export",
+  ],
   // Zástupce: vidí svůj modul a své odběratele, může exportovat.
-  Zástupce: ["stock.view", "stock.export"],
+  Zástupce: [
+    "stock.view",
+    "stock.export",
+    "analytics.view",
+    "analytics.export",
+  ],
 };
 
 // Naše vlastní e-shopy — nepočítají se jako odběratelé (§5.2 zadání).
@@ -82,9 +94,7 @@ async function main() {
       create: { klic: m.key, nazev: m.nazev, poradi: m.poradi, aktivni: true },
     });
   }
-  const stockModule = await prisma.module.findUniqueOrThrow({
-    where: { klic: "stock" },
-  });
+  const moduleRows = await prisma.module.findMany();
   console.log(`  ✓ moduly: ${allModules().map((m) => m.key).join(", ")}`);
 
   // ── Odběratelé (vlastní e-shopy + demo) ────────────────
@@ -133,12 +143,14 @@ async function main() {
     });
     userIds[u.email] = user.id;
 
-    // Přístup k modulu stock (zrcadlí oprávnění; připraveno na jemnější správu).
-    await prisma.userModuleAccess.upsert({
-      where: { userId_moduleId: { userId: user.id, moduleId: stockModule.id } },
-      update: {},
-      create: { userId: user.id, moduleId: stockModule.id },
-    });
+    // Přístup ke všem modulům (zrcadlí oprávnění; připraveno na jemnější správu).
+    for (const m of moduleRows) {
+      await prisma.userModuleAccess.upsert({
+        where: { userId_moduleId: { userId: user.id, moduleId: m.id } },
+        update: {},
+        create: { userId: user.id, moduleId: m.id },
+      });
+    }
   }
   console.log(`  ✓ uživatelé: ${userDefs.length}`);
 

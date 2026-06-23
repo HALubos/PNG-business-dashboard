@@ -1,6 +1,24 @@
 import { prisma } from "@/lib/prisma";
-import { can, type AuthUser } from "@/core/rbac/access";
+import { type AuthUser } from "@/core/rbac/access";
 import { DEFAULT_AVAILABLE_STATES } from "./constants";
+import {
+  classifyProduct,
+  createStockResolver,
+  isRestockCandidate,
+  resellerHasStock,
+  type OpportunityCategory,
+  type StockSource,
+} from "./rules";
+import {
+  getVisibleResellers,
+  canViewReseller as canViewResellerScoped,
+} from "./reseller-scope";
+
+// Rozsah dat modulu stock je vázaný na právo „stock.viewall".
+const STOCK_VIEWALL = "stock.viewall";
+
+// Re-export kvůli zpětné kompatibilitě (pravidlo a typy vlastní rules.ts).
+export type { OpportunityCategory, StockSource } from "./rules";
 
 // Decimal → number | null
 function numOrNull(v: unknown): number | null {
@@ -44,15 +62,7 @@ export interface ResellerOption {
 export async function listResellersForUser(
   user: AuthUser,
 ): Promise<ResellerOption[]> {
-  const base = { jeVlastni: false } as const;
-  const where = can(user, "stock.viewall")
-    ? base
-    : { ...base, repLinks: { some: { userId: user.id } } };
-  return prisma.reseller.findMany({
-    where,
-    orderBy: { domena: "asc" },
-    select: { id: true, domena: true, nazev: true },
-  });
+  return getVisibleResellers(user, STOCK_VIEWALL);
 }
 
 /** Smí uživatel vidět daného odběratele? Vynuceno na backendu. */
@@ -60,28 +70,8 @@ export async function canViewReseller(
   user: AuthUser,
   resellerId: string,
 ): Promise<boolean> {
-  if (can(user, "stock.viewall")) {
-    const r = await prisma.reseller.findUnique({
-      where: { id: resellerId },
-      select: { jeVlastni: true },
-    });
-    return !!r && !r.jeVlastni;
-  }
-  const link = await prisma.repCustomer.findUnique({
-    where: { userId_resellerId: { userId: user.id, resellerId } },
-  });
-  return !!link;
+  return canViewResellerScoped(user, resellerId, STOCK_VIEWALL);
 }
-
-// Kategorie produktu u odběratele (kvadranty „máme my" × „má odběratel"):
-//  - opportunity:  máme skladem, odběratel nemá dostupné  → nabídnout (§5.4)
-//  - reseller_has: máme skladem, odběratel má dostupné     → kontext „už veze"
-//  - we_out:       my vyprodáno (≤ práh)                   → my to teď nedodáme
-export type OpportunityCategory = "opportunity" | "reseller_has" | "we_out";
-
-// Odkud pochází náš sklad: feed = živý XML feed, none = ve feedu chybí (→ 0),
-// xlsx = feed ještě neproběhl, použit sloupec Stock z Price Checku (pojistka).
-export type StockSource = "feed" | "none" | "xlsx";
 
 export interface Opportunity {
   productId: string;
@@ -126,18 +116,11 @@ export async function categorizeResellerProducts(
     orderBy: [{ product: { producer: "asc" } }, { product: { nazev: "asc" } }],
   });
 
-  // Živý sklad z feedu (dle EANu). Pojistka: dokud feed nikdy neproběhl,
-  // bereme sklad z XLSX, ať modul není prázdný.
-  const feedReady = config.feedRefreshedAt != null;
-  const stockMap = new Map<string, { stock: number; stock7d: number }>();
-  if (feedReady) {
-    const eans = [...new Set(rows.map((r) => r.product.ean))];
-    const live = await prisma.ourStockItem.findMany({
-      where: { ean: { in: eans } },
-      select: { ean: true, stock: true, stock7d: true },
-    });
-    for (const it of live) stockMap.set(it.ean, { stock: it.stock, stock7d: it.stock7d });
-  }
+  // Sdílené pravidlo: efektivní sklad (feed → fallback) a kategorizace.
+  const resolver = await createStockResolver(
+    rows.map((r) => r.product.ean),
+    config,
+  );
 
   const buckets: ResellerProductBuckets = {
     opportunities: [],
@@ -146,27 +129,12 @@ export async function categorizeResellerProducts(
   };
 
   for (const r of rows) {
-    const live = stockMap.get(r.product.ean);
-    // Feed je zdroj pravdy: ve feedu chybí → 0. Bez feedu (pojistka) → XLSX Stock.
-    const effectiveStock = feedReady
-      ? (live?.stock ?? 0)
-      : r.product.ourStock;
-    const stock7d = live ? live.stock7d : null;
-    const stockSource: StockSource = feedReady
-      ? live
-        ? "feed"
-        : "none"
-      : "xlsx";
-
-    const ourInStock = effectiveStock > config.stockThreshold;
-    const resellerHas = r.availability
-      ? config.availableStates.includes(r.availability)
-      : false;
-
-    let category: OpportunityCategory;
-    if (!ourInStock) category = "we_out";
-    else if (resellerHas) category = "reseller_has";
-    else category = "opportunity";
+    const eff = resolver.resolve(r.product.ean, r.product.ourStock);
+    const ruleArgs = {
+      availability: r.availability,
+      effectiveStock: eff.stock,
+    };
+    const category = classifyProduct(ruleArgs, config);
 
     const row: Opportunity = {
       productId: r.productId,
@@ -175,17 +143,17 @@ export async function categorizeResellerProducts(
       size: r.product.size,
       producer: r.product.producer,
       kategorie: r.product.kategorie,
-      ourStock: effectiveStock,
-      stock7d,
-      stockSource,
+      ourStock: eff.stock,
+      stock7d: eff.stock7d,
+      stockSource: eff.source,
       salePrice: numOrNull(r.product.salePrice),
       price: numOrNull(r.product.price),
       resellerStock: r.stock,
       availability: r.availability,
       resellerCena: numOrNull(r.cena),
       category,
-      resellerHas,
-      isRestockCandidate: !ourInStock && !resellerHas,
+      resellerHas: resellerHasStock(r.availability, config),
+      isRestockCandidate: isRestockCandidate(ruleArgs, config),
     };
 
     if (category === "opportunity") buckets.opportunities.push(row);

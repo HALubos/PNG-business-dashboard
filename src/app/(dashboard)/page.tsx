@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   PackageSearch,
   Settings,
+  BarChart3,
   ArrowRight,
   ShieldAlert,
   type LucideIcon,
@@ -21,6 +22,7 @@ import { can } from "@/core/rbac/access";
 const TILE_ICONS: Record<string, LucideIcon> = {
   PackageSearch,
   Settings,
+  BarChart3,
 };
 
 export default async function DashboardHomePage({

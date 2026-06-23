@@ -7,9 +7,10 @@ TanStack Table**.
 Plné zadání: [`ZADANI-dashboard-v1.md`](./ZADANI-dashboard-v1.md) · pravidla:
 [`CLAUDE.md`](./CLAUDE.md).
 
-> **Stav:** Fáze 0 (skelet) + Fáze 1 (modul **Kontrola skladovosti**) hotové.
-> Login, RBAC, registr modulů, responzivní layout; import Price Check XLSX,
-> tabulka příležitostí, export XLSX/CSV. Vario/Heureka/automatizace = fáze 2+.
+> **Stav:** Fáze 0 (skelet) + Fáze 1 (modul **Kontrola skladovosti**) + modul
+> **Obchodní analytika** hotové. Login, RBAC, registr modulů, responzivní layout;
+> import Price Check XLSX + živá skladovost z feedu, tabulka příležitostí, export
+> XLSX/CSV; analytika (žebříčky + trend). Vario/Heureka/automatizace = fáze 2+.
 
 ---
 
@@ -153,6 +154,21 @@ Najdeš ho v menu jako **Kontrola skladovosti** (`/skladovost`).
 - **Nastavení** (právo `stock.admin`): množina dostupných stavů + práh skladu.
 - **Rozsah dat:** Admin/Manažer (`stock.viewall`) vidí všechny odběratele; Zástupce
   jen své přiřazené (`RepCustomer`) — vynuceno i u exportu a výpočtu na backendu.
+
+## Modul „Obchodní analytika" (`/analytika`)
+
+Agregační vrstva nad logikou modulu `stock` (žádný nový zdroj ani import) — **koho
+oslovit první** a **co tlačit do nabídek**.
+
+- **KPI souhrn** (živý sklad): počet příležitostí, hodnota, odběratelů, produktů + datum snapshotu.
+- **Žebříček odběratelů** a **top produkty napříč trhem** (TanStack: řazení, hledání, filtr značka/kategorie).
+- **Trend** (porovnání aktivního a předchozího snapshotu) — počítaný z **verzovaného
+  `Product.ourStock`** obou snapshotů, aby byl férový (živý feed je jen pro headline).
+  ↑/↓/– u každého řádku; skryje se, když předchozí snapshot není.
+- **Proklik** z odběratele rovnou do `/skladovost` na jeho akční seznam.
+- **Export** žebříčků do XLSX/CSV (`analytics.export`), respektuje filtry i RBAC scope.
+- **RBAC scope dat:** Admin/Manažer (`analytics.viewall`) vidí všechny odběratele,
+  Zástupce jen své (`RepCustomer`) — sdílí helper s modulem `stock` (anti-drift).
 
 ## RBAC — model práv
 
