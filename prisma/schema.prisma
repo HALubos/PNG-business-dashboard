@@ -1,0 +1,215 @@
+// Prisma schéma — jádro obchodního dashboardu ACTIVENT365 (fáze 0)
+// Plné zadání: ZADANI-dashboard-v1.md, pravidla: CLAUDE.md
+// Prisma 7 — nový generátor `prisma-client` s povinným `output`.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: connection URL se konfiguruje v prisma.config.ts (migrace)
+  // a přes driver adapter v src/lib/prisma.ts (runtime).
+}
+
+// ─────────────────────────────────────────────────────────────
+// Jádro: uživatelé, role, práva
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  jmeno        String
+  email        String   @unique
+  hesloHash    String
+  aktivni      Boolean  @default(true)
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
+  vytvoreno    DateTime @default(now())
+
+  moduleAccess UserModuleAccess[]
+  repCustomers RepCustomer[] // odběratelé přiřazení tomuto zástupci
+  auditLogs    AuditLog[]
+  snapshots    ImportSnapshot[] // importy, které uživatel nahrál
+
+  @@index([roleId])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  nazev       String           @unique // Admin, Manažer, Zástupce
+  popis       String?
+  users       User[]
+  permissions RolePermission[]
+}
+
+// Oprávnění = "modul.akce", např. "stock.view", "admin.users"
+model Permission {
+  id        String           @id @default(cuid())
+  klic      String           @unique // "stock.view"
+  moduleKey String // "stock", "admin" — pro filtrování dle modulu
+  akce      String // view | export | edit | admin
+  popis     String?
+  roles     RolePermission[]
+
+  @@index([moduleKey])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Registr modulů (zrcadlo kódového registru v src/core/modules)
+// ─────────────────────────────────────────────────────────────
+
+model Module {
+  id      String             @id @default(cuid())
+  klic    String             @unique // "stock"
+  nazev   String // "Kontrola skladovosti"
+  aktivni Boolean            @default(true)
+  poradi  Int                @default(0)
+  access  UserModuleAccess[]
+}
+
+// Volitelné zpřístupnění modulu konkrétnímu uživateli nad rámec role.
+model UserModuleAccess {
+  userId   String
+  moduleId String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, moduleId])
+  @@index([moduleId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Odběratelé a jejich přiřazení zástupcům
+// (Reseller je ve fázi 0 minimální; fáze 1 ho rozšíří o data/snapshoty)
+// ─────────────────────────────────────────────────────────────
+
+model Reseller {
+  id             String        @id @default(cuid())
+  domena         String        @unique // "affekt.cz"
+  nazev          String?
+  jeVlastni      Boolean       @default(false) // naše e-shopy (pinguin.cz…) ≠ odběratel
+  repLinks       RepCustomer[]
+  availabilities ResellerProductAvailability[]
+}
+
+model RepCustomer {
+  userId     String
+  resellerId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reseller   Reseller @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+
+  @@id([userId, resellerId])
+  @@index([resellerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Audit log — kdo co kdy (přihlášení, importy, exporty, změny)
+// ─────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id     String   @id @default(cuid())
+  userId String?
+  user   User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  akce   String // "login", "import", "export", "user.create"…
+  entita String? // dotčená entita / identifikátor
+  detail Json?
+  cas    DateTime @default(now())
+
+  @@index([userId])
+  @@index([cas])
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODUL „Kontrola skladovosti" (stock) — verzované snapshoty importů
+// ─────────────────────────────────────────────────────────────
+
+// Jeden import Price Check XLSX = jeden snapshot (historie pro trendy).
+model ImportSnapshot {
+  id              String   @id @default(cuid())
+  nazevSouboru    String
+  datumExportu    DateTime // z názvu listu, např. „21.6.2026"
+  nahranoKdy      DateTime @default(now())
+  nahralUserId    String?
+  nahral          User?    @relation(fields: [nahralUserId], references: [id], onDelete: SetNull)
+  pocetProduktu   Int      @default(0)
+  pocetOdberatelu Int      @default(0)
+  pocetRadku      Int      @default(0)
+  varovani        Json? // pole textových varování z parseru
+  aktivni         Boolean  @default(false) // snapshot, který modul aktuálně používá
+
+  products       Product[]
+  availabilities ResellerProductAvailability[]
+
+  @@index([aktivni])
+  @@index([nahranoKdy])
+}
+
+// Náš produkt v rámci snapshotu (spojovací klíč napříč zdroji = EAN).
+model Product {
+  id                  String   @id @default(cuid())
+  snapshotId          String
+  snapshot            ImportSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  ean                 String
+  code                String?
+  producer            String? // Pinguin / Acepac / Activent
+  nazev               String
+  size                String?
+  kategorie           String?
+  kategorieBreadcrumb String?
+  ourStock            Int      @default(0) // náš sklad (ks)
+  salePrice           Decimal? @db.Decimal(12, 2) // Sale price
+  price               Decimal? @db.Decimal(12, 2) // Price
+
+  availabilities ResellerProductAvailability[]
+
+  @@unique([snapshotId, ean])
+  @@index([snapshotId, producer])
+}
+
+// Dostupnost konkrétního produktu u konkrétního odběratele v daném snapshotu.
+model ResellerProductAvailability {
+  id           String   @id @default(cuid())
+  snapshotId   String
+  snapshot     ImportSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  resellerId   String
+  reseller     Reseller @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  stock        Int? // 1/0 z exportu
+  availability String? // „skladem", „do 3 dnů", … (null = stav neuveden)
+  cena         Decimal? @db.Decimal(12, 2)
+
+  @@unique([snapshotId, productId, resellerId])
+  @@index([snapshotId, resellerId]) // rychlé „příležitosti pro odběratele"
+  @@index([productId])
+}
+
+// Konfigurace modulu skladovosti (singleton) — §5.4 zadání.
+model StockConfig {
+  id              Int       @id @default(1)
+  availableStates String[]  @default(["skladem", "do 3 dnů"]) // co se počítá za „dostupné"
+  stockThreshold  Int       @default(0) // náš sklad musí být > práh
+  feedRefreshedAt DateTime? // poslední aktualizace skladu z XML feedu
+  feedItems       Int? // počet položek v posledním feedu
+  updatedAt       DateTime  @updatedAt
+}
+
+// Živá skladovost z XML feedu (pinguin.24gate.com), globální dle EANu.
+// Přemazává se při každé aktualizaci feedu; nezávislá na snapshotu Price Checku.
+model OurStockItem {
+  ean       String   @id // EAN = spojovací klíč s Product.ean
+  stock     Int      @default(0) // availability (ks aktuálně skladem)
+  stock7d   Int      @default(0) // availability7d (příjem do 7 dnů)
+  updatedAt DateTime @updatedAt
+}
