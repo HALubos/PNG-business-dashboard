@@ -118,3 +118,65 @@ export async function createStockResolver(
       effectiveStockFor(productOurStock, map.get(ean), feedReady),
   };
 }
+
+// ── Efektivní dostupnost ODBĚRATELE (feed odběratele → fallback Price Check) ──
+
+// Odkud pochází dostupnost u odběratele: feed = jeho XML feed, pricecheck = Price Check.
+export type AvailabilitySource = "feed" | "pricecheck";
+
+export interface EffectiveAvailability {
+  availability: string | null; // textový stav v našem vokabuláři
+  stock: number | null; // ks z feedu (když je)
+  source: AvailabilitySource;
+}
+
+/**
+ * Efektivní dostupnost produktu u odběratele:
+ *  - feed odběratele je ready A daný EAN je ve feedu → z feedu (text; chybí-li, odvoď z ks),
+ *  - jinak → z Price Checku (fallback).
+ */
+export function effectiveAvailabilityFor(
+  priceCheckAvailability: string | null,
+  feedItem: { stock: number | null; availability: string | null } | undefined,
+  feedReady: boolean,
+): EffectiveAvailability {
+  if (feedReady && feedItem) {
+    const availability =
+      feedItem.availability ??
+      (feedItem.stock !== null && feedItem.stock > 0 ? "skladem" : null);
+    return { availability, stock: feedItem.stock, source: "feed" };
+  }
+  return { availability: priceCheckAvailability, stock: null, source: "pricecheck" };
+}
+
+export interface ResellerAvailabilityResolver {
+  feedReady: boolean;
+  resolve(ean: string, priceCheckAvailability: string | null): EffectiveAvailability;
+}
+
+/**
+ * Resolver efektivní dostupnosti pro JEDNOHO odběratele (analogicky k createStockResolver).
+ * feedReady = odběratel má feedUrl A proběhla aktualizace (feedRefreshedAt != null).
+ * Když ready, načte ResellerFeedItem pro dané EANy; jinak vždy fallback na Price Check.
+ */
+export async function createResellerAvailabilityResolver(
+  reseller: { id: string; feedUrl: string | null; feedRefreshedAt: Date | null },
+  eans: string[],
+): Promise<ResellerAvailabilityResolver> {
+  const feedReady = !!reseller.feedUrl && reseller.feedRefreshedAt != null;
+  const map = new Map<string, { stock: number | null; availability: string | null }>();
+  if (feedReady) {
+    const items = await prisma.resellerFeedItem.findMany({
+      where: { resellerId: reseller.id, ean: { in: [...new Set(eans)] } },
+      select: { ean: true, stock: true, availability: true },
+    });
+    for (const it of items) {
+      map.set(it.ean, { stock: it.stock, availability: it.availability });
+    }
+  }
+  return {
+    feedReady,
+    resolve: (ean, priceCheckAvailability) =>
+      effectiveAvailabilityFor(priceCheckAvailability, map.get(ean), feedReady),
+  };
+}

@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Search,
   RotateCw,
+  Radio,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ export interface OpportunityRow {
   salePrice: number | null;
   resellerCena: number | null;
   availability: string | null;
+  availabilitySource?: "feed" | "pricecheck";
   resellerHas?: boolean;
   isRestockCandidate?: boolean;
 }
@@ -185,6 +187,14 @@ export function OpportunitiesTable({
               <Badge variant={o.resellerHas ? "success" : "warning"}>
                 {availabilityLabel(o.availability)}
               </Badge>
+              {o.availabilitySource === "feed" ? (
+                <span
+                  className="inline-flex items-center gap-0.5 text-xs text-[var(--muted-foreground)]"
+                  title="Stav z feedu odběratele"
+                >
+                  <Radio className="size-3" /> feed
+                </span>
+              ) : null}
               {showRestock && o.isRestockCandidate ? (
                 <Badge variant="secondary" className="gap-1">
                   <RotateCw className="size-3" /> restock

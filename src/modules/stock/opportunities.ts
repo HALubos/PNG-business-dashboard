@@ -4,10 +4,12 @@ import { DEFAULT_AVAILABLE_STATES } from "./constants";
 import {
   classifyProduct,
   createStockResolver,
+  createResellerAvailabilityResolver,
   isRestockCandidate,
   resellerHasStock,
   type OpportunityCategory,
   type StockSource,
+  type AvailabilitySource,
 } from "./rules";
 import {
   getVisibleResellers,
@@ -18,7 +20,11 @@ import {
 const STOCK_VIEWALL = "stock.viewall";
 
 // Re-export kvůli zpětné kompatibilitě (pravidlo a typy vlastní rules.ts).
-export type { OpportunityCategory, StockSource } from "./rules";
+export type {
+  OpportunityCategory,
+  StockSource,
+  AvailabilitySource,
+} from "./rules";
 
 // Decimal → number | null
 function numOrNull(v: unknown): number | null {
@@ -86,7 +92,8 @@ export interface Opportunity {
   salePrice: number | null;
   price: number | null;
   resellerStock: number | null;
-  availability: string | null;
+  availability: string | null; // efektivní dostupnost (feed odběratele → fallback Price Check)
+  availabilitySource: AvailabilitySource;
   resellerCena: number | null;
   category: OpportunityCategory;
   /** Má odběratel produkt jako dostupný (availability ∈ availableStates)? */
@@ -110,17 +117,27 @@ export async function categorizeResellerProducts(
   resellerId: string,
   config: StockSettings,
 ): Promise<ResellerProductBuckets> {
-  const rows = await prisma.resellerProductAvailability.findMany({
-    where: { snapshotId, resellerId },
-    include: { product: true },
-    orderBy: [{ product: { producer: "asc" } }, { product: { nazev: "asc" } }],
-  });
+  const [reseller, rows] = await Promise.all([
+    prisma.reseller.findUnique({
+      where: { id: resellerId },
+      select: { id: true, feedUrl: true, feedRefreshedAt: true },
+    }),
+    prisma.resellerProductAvailability.findMany({
+      where: { snapshotId, resellerId },
+      include: { product: true },
+      orderBy: [{ product: { producer: "asc" } }, { product: { nazev: "asc" } }],
+    }),
+  ]);
 
-  // Sdílené pravidlo: efektivní sklad (feed → fallback) a kategorizace.
-  const resolver = await createStockResolver(
-    rows.map((r) => r.product.ean),
-    config,
-  );
+  const eans = rows.map((r) => r.product.ean);
+  // Sdílená pravidla: efektivní sklad (náš feed) + efektivní dostupnost (feed odběratele).
+  const [stockResolver, availResolver] = await Promise.all([
+    createStockResolver(eans, config),
+    createResellerAvailabilityResolver(
+      reseller ?? { id: resellerId, feedUrl: null, feedRefreshedAt: null },
+      eans,
+    ),
+  ]);
 
   const buckets: ResellerProductBuckets = {
     opportunities: [],
@@ -129,9 +146,10 @@ export async function categorizeResellerProducts(
   };
 
   for (const r of rows) {
-    const eff = resolver.resolve(r.product.ean, r.product.ourStock);
+    const eff = stockResolver.resolve(r.product.ean, r.product.ourStock);
+    const av = availResolver.resolve(r.product.ean, r.availability);
     const ruleArgs = {
-      availability: r.availability,
+      availability: av.availability,
       effectiveStock: eff.stock,
     };
     const category = classifyProduct(ruleArgs, config);
@@ -148,11 +166,12 @@ export async function categorizeResellerProducts(
       stockSource: eff.source,
       salePrice: numOrNull(r.product.salePrice),
       price: numOrNull(r.product.price),
-      resellerStock: r.stock,
-      availability: r.availability,
+      resellerStock: av.stock ?? r.stock,
+      availability: av.availability,
+      availabilitySource: av.source,
       resellerCena: numOrNull(r.cena),
       category,
-      resellerHas: resellerHasStock(r.availability, config),
+      resellerHas: resellerHasStock(av.availability, config),
       isRestockCandidate: isRestockCandidate(ruleArgs, config),
     };
 

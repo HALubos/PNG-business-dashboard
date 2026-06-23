@@ -24,6 +24,10 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "analytics.view",
     "analytics.viewall",
     "analytics.export",
+    "resellers.view",
+    "resellers.viewall",
+    "resellers.edit",
+    "resellers.admin",
   ],
   // Zástupce: vidí svůj modul a své odběratele, může exportovat.
   Zástupce: [
@@ -31,6 +35,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "stock.export",
     "analytics.view",
     "analytics.export",
+    "resellers.view",
   ],
 };
 

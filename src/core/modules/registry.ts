@@ -2,12 +2,17 @@ import type { ModuleDefinition } from "./types";
 import { modulePermissionKeys } from "./types";
 import { stockModule } from "./stock/module";
 import { analyticsModule } from "./analytics/module";
+import { resellersModule } from "./resellers/module";
 
 // ─────────────────────────────────────────────────────────────
 // REGISTR MODULŮ
 // Nový modul přidáš sem (jeden řádek) — žádný jiný zásah do jádra.
 // ─────────────────────────────────────────────────────────────
-const MODULES: ModuleDefinition[] = [stockModule, analyticsModule];
+const MODULES: ModuleDefinition[] = [
+  stockModule,
+  analyticsModule,
+  resellersModule,
+];
 
 /** Všechny zaregistrované moduly, seřazené dle pořadí. */
 export function allModules(): ModuleDefinition[] {

@@ -36,8 +36,17 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
   `src/modules/stock/reseller-scope.ts`. Služba: `src/modules/analytics/aggregate.ts`,
   stránka `/analytika`, export `/api/analytics/export`. Headline = živý sklad,
   trend = verzovaný `Product.ourStock` obou snapshotů.
-- **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka, automatický import, produkční hosting,
-  další moduly.
+- **Modul „Odběratelé" (klíč `resellers`) — HOTOVO.** Správa karet odběratelů +
+  **per-odběratel feed dostupnosti**. Feed ZPŘESŇUJE Price Check: má-li odběratel
+  `feedUrl` a proběhl refresh (`feedRefreshedAt`) a EAN je ve feedu → dostupnost
+  (a ks) z feedu, jinak fallback Price Check. Formát se vybírá z registru
+  (`src/modules/resellers/feed/formats.ts`: heureka / google / interni / ostatni →
+  `feedConfig`). Pravidlo sdílené v `rules.ts` (`effectiveAvailabilityFor` +
+  `createResellerAvailabilityResolver`); zapojené do `stock` i `analytics` headline
+  (trend zůstává na verzovaném Price Checku). Stránky `/odberatele` (+ detail/edit),
+  service `refreshResellerFeed`. Náš skladový feed (`OurStockItem`) je oddělený.
+- **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka jako úplně nové listingy, automatické
+  (cron) stahování feedů, produkční hosting. Nové moduly se přidávají na zadání.
 
 ### Klíčová technická rozhodnutí (odchylky od původní specifikace)
 
@@ -52,6 +61,32 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
 - **RBAC akce:** `view / viewall / export / edit / admin`. Guardy: `requirePermission()`
   (stránky), `assertPermission()`/`can()` (akce/handlery), `canViewReseller()` (scope dat).
 - **Lokální DB:** Docker přes **Colima** (na stroji není Docker Desktop). Viz Příkazy.
+
+## Datový tok & sdílené vzory (ČTI před úpravou logiky)
+
+**Tři zdroje dat o skladu/dostupnosti** (kombinují se, nepřepisují celé):
+1. **Price Check XLSX** → `ImportSnapshot` / `Product` / `ResellerProductAvailability`
+   (verzované snapshoty). Dává: sortiment odběratele, výchozí dostupnost, XLSX sklad.
+2. **Náš skladový feed** (`STOCK_FEED_URL`) → `OurStockItem` (živý NÁŠ sklad dle EANu).
+3. **Feed odběratele** (`Reseller.feedUrl`) → `ResellerFeedItem` (živá dostupnost
+   odběratele dle EANu, per odběratel).
+
+**Sloučení = JEDINÉ sdílené pravidlo `src/modules/stock/rules.ts`** (zdroj pravdy,
+NIKDY neduplikuj — to je anti-drift):
+- `createStockResolver` + `effectiveStockFor` → efektivní NÁŠ sklad (feed → fallback `Product.ourStock`).
+- `createResellerAvailabilityResolver` + `effectiveAvailabilityFor` → efektivní DOSTUPNOST
+  odběratele (jeho feed → fallback Price Check); `stockSource` / `availabilitySource` říká odkud.
+- `classifyProduct` → `opportunity` / `reseller_has` / `we_out` (porovnání s `StockConfig.availableStates`).
+
+**Kdo pravidlo volá:** `stock` (`categorizeResellerProducts` v `opportunities.ts`) i
+`analytics` (`aggregate.ts`). Když měníš logiku příležitostí, uprav **jen `rules.ts`** — promítne se do obou.
+
+**RBAC scope odběratelů** = `src/modules/stock/reseller-scope.ts`
+(`getVisibleResellers` / `canViewReseller` s klíčem práva `<modul>.viewall`). Sdílí
+ho stock i analytics i resellers — opět neduplikovat.
+
+**Trend v analytice** = verzovaný Price Check (`Product.ourStock` + surová `availability`
+obou snapshotů) — živé feedy se NEverzují, do trendu nevstupují.
 
 ## Terminologie (důležité)
 
@@ -79,13 +114,15 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
 
 ## Logika modulu skladovosti (přesně)
 
-Pro zvoleného odběratele zobraz produkty, kde současně platí:
+Pro zvoleného odběratele zobraz produkty, kde současně platí (vyhodnocuje `rules.ts`):
 
-1. **My skladem:** náš `Stock` > 0.
-2. **Odběratel produkt prodává:** v Price Checku se u produktu objevuje jeho doména.
-3. **Odběratel nemá dostupné:** jeho `Availability` **NENÍ** v `{skladem, do 3 dnů}`
-   (tj. `do týdne`, `two_weeks`, `do měsíce`, `info v obchodu`, nebo nelistuje).
-   Množina dostupných stavů je konfigurovatelná (default `skladem`, `do 3 dnů`).
+1. **My skladem:** efektivní náš sklad > práh (`StockConfig.stockThreshold`). Efektivní
+   sklad = `OurStockItem` (živý feed) → fallback `Product.ourStock` (XLSX).
+2. **Odběratel produkt prodává:** v Price Checku se u produktu objevuje jeho doména
+   (sortiment je z Price Checku — i ve v1 s feedy).
+3. **Odběratel nemá dostupné:** jeho **efektivní** `Availability` **NENÍ** v `availableStates`
+   (default `{skladem, do 3 dnů}`). Efektivní dostupnost = feed odběratele → fallback Price
+   Check. Nedostupné = `do týdne`, `two_weeks`, `do měsíce`, `info v obchodu`, nebo chybí.
 
 Spojovací klíč produktů = **EAN**. **Naše vlastní e-shopy** (pinguin.cz, activent.cz,
 acepac.bike, pinguin-shop.cz) označ jako vlastní a **nepočítej je jako odběratele**.
@@ -106,8 +143,8 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 ├─ prisma.config.ts           # Prisma 7 config (URL pro migrace + seed)
 ├─ ZADANI-dashboard-v1.md     # plné zadání · CLAUDE.md · README.md
 ├─ prisma/
-│  ├─ schema.prisma           # User, Role, Permission, Module, Reseller, RepCustomer, AuditLog,
-│  │                          #   ImportSnapshot, Product, ResellerProductAvailability, StockConfig, OurStockItem
+│  ├─ schema.prisma           # User, Role, Permission, Module, Reseller(+feed), RepCustomer, AuditLog,
+│  │                          #   ImportSnapshot, Product, ResellerProductAvailability, StockConfig, OurStockItem, ResellerFeedItem
 │  ├─ migrations/             # SQL migrace
 │  └─ seed.ts                 # admin Lubos + 3 zástupci + role/práva + modul + StockConfig
 ├─ src/
@@ -115,14 +152,15 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  ├─ app/
 │  │  ├─ (auth)/login/        # přihlášení + server action
 │  │  ├─ (dashboard)/         # layout s navigací dle práv
-│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/
+│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/ · odberatele/
 │  │  └─ api/{auth,stock/export,analytics/export}/
 │  ├─ core/
 │  │  ├─ auth/                # auth.config.ts, auth.ts, session.ts, password.ts
-│  │  ├─ modules/             # registry.ts (REGISTR), types.ts, stock/module.ts, analytics/module.ts
+│  │  ├─ modules/             # registry.ts (REGISTR), types.ts, stock|analytics|resellers/module.ts
 │  │  └─ rbac/                # access.ts (can/assert), permissions.ts
 │  ├─ modules/stock/          # constants, opportunities, rules, reseller-scope, import/, feed/, components/
 │  ├─ modules/analytics/      # aggregate (žebříčky + trend), components/
+│  ├─ modules/resellers/      # feed/ (formats registr + parser + service), components/
 │  ├─ components/{ui,dashboard}/
 │  ├─ lib/{prisma,utils}.ts
 │  └─ generated/prisma/       # generovaný Prisma klient (mimo git)
@@ -157,7 +195,10 @@ Náš aktuální sklad pochází z XML feedu (`STOCK_FEED_URL` v `.env.local`; k
 přepíše při aktualizaci. Aktualizace: tlačítko v `/skladovost` (`stock.edit`) nebo
 automaticky při importu XLSX. Cron automatizace = fáze 2.
 
-## Co teď NEdělat
+## Co teď NEdělat (fáze 2+)
 
-Vario integrace, Heureka, automatické stahování Price Checku, produkční hosting,
-další moduly. Drž se fáze 0 a 1 (viz §8 zadání).
+Vario integrace, Heureka, **automatické stahování** Price Checku / feedu (cron),
+produkční hosting a citlivost dat. To je fáze 2+ — bez výslovného zadání neřešit.
+
+Nové **moduly** se naopak přidávají na zadání (tak vznikl `analytics`) — vždy přes
+registraci (viz „Přidání nového modulu"), nikdy zásahem do jádra.

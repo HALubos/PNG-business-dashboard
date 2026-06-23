@@ -7,10 +7,11 @@ TanStack Table**.
 Plné zadání: [`ZADANI-dashboard-v1.md`](./ZADANI-dashboard-v1.md) · pravidla:
 [`CLAUDE.md`](./CLAUDE.md).
 
-> **Stav:** Fáze 0 (skelet) + Fáze 1 (modul **Kontrola skladovosti**) + modul
-> **Obchodní analytika** hotové. Login, RBAC, registr modulů, responzivní layout;
-> import Price Check XLSX + živá skladovost z feedu, tabulka příležitostí, export
-> XLSX/CSV; analytika (žebříčky + trend). Vario/Heureka/automatizace = fáze 2+.
+> **Stav:** Fáze 0 (skelet) + moduly **Kontrola skladovosti**, **Obchodní analytika**
+> a **Odběratelé** hotové. Login, RBAC, registr modulů, responzivní layout; import
+> Price Check XLSX + živá skladovost z feedu, tabulka příležitostí, export XLSX/CSV;
+> analytika (žebříčky + trend); per-odběratel feed dostupnosti (Heureka/Google/
+> Interní/Ostatní). Automatizace (cron) / Vario = fáze 2+.
 
 ---
 
@@ -169,6 +170,20 @@ oslovit první** a **co tlačit do nabídek**.
 - **Export** žebříčků do XLSX/CSV (`analytics.export`), respektuje filtry i RBAC scope.
 - **RBAC scope dat:** Admin/Manažer (`analytics.viewall`) vidí všechny odběratele,
   Zástupce jen své (`RepCustomer`) — sdílí helper s modulem `stock` (anti-drift).
+
+## Modul „Odběratelé" (`/odberatele`)
+
+Správa karet odběratelů a jejich **feedů dostupnosti**.
+
+- **Seznam** (RBAC scope — zástupce jen své), **detail/editace** (`resellers.edit`):
+  název, Feed URL, **výběr formátu** (Heureka / Google / Interní / Ostatní),
+  přepínač *vlastní*, tlačítko **Aktualizovat feed**. `feedConfig` (JSON) jen u „Ostatní".
+- **Feed zpřesňuje Price Check:** má-li odběratel funkční feed a daný EAN je v něm →
+  dostupnost (a ks) se vezme z feedu; jinak fallback na Price Check. Logika je ve
+  sdíleném `src/modules/stock/rules.ts` → promítá se do modulu `stock` (odznak
+  „📻 feed" u stavu) i do `analytics`. Trend zůstává na verzovaném Price Checku.
+- **Formáty** jsou registr (`src/modules/resellers/feed/formats.ts`) — přidání dalšího
+  = jedna položka. Mapování Heureka/Google je rozumný default s TODO na doladění.
 
 ## RBAC — model práv
 

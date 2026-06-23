@@ -101,6 +101,27 @@ model Reseller {
   jeVlastni      Boolean       @default(false) // naše e-shopy (pinguin.cz…) ≠ odběratel
   repLinks       RepCustomer[]
   availabilities ResellerProductAvailability[]
+
+  // Per-odběratel feed dostupnosti (zpřesňuje Price Check; vše nepovinné).
+  feedUrl         String?
+  feedFormat      String? // "heureka" | "google" | "interni" | "ostatni"
+  feedConfig      Json? // ruční mapování — relevantní jen pro "ostatni"
+  feedRefreshedAt DateTime?
+  feedItems       Int?
+  feedFeedItems   ResellerFeedItem[]
+}
+
+// Živá dostupnost z feedu odběratele (dle EANu v rámci odběratele) — neverzované,
+// jako OurStockItem. Při aktualizaci se položky daného odběratele přepíšou.
+model ResellerFeedItem {
+  resellerId   String
+  reseller     Reseller @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  ean          String
+  stock        Int? // počet ks (když feed nese)
+  availability String? // textový stav v našem vokabuláři (skladem / do 3 dnů / …) nebo null
+  updatedAt    DateTime @updatedAt
+
+  @@id([resellerId, ean])
 }
 
 model RepCustomer {

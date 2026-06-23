@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { type AuthUser } from "@/core/rbac/access";
-import { classifyProduct, createStockResolver } from "@/modules/stock/rules";
+import {
+  classifyProduct,
+  createStockResolver,
+  effectiveAvailabilityFor,
+} from "@/modules/stock/rules";
 import { getActiveSnapshot, getStockConfig } from "@/modules/stock/opportunities";
 import {
   getVisibleResellers,
@@ -222,6 +226,28 @@ export async function aggregateOpportunities(opts: {
     config,
   );
 
+  // 3) Efektivní dostupnost per odběratel z jeho feedu (headline — živá data).
+  //    (Trend níže zůstává na surovém Price Checku — feed se neverzuje.)
+  const feedResellers = await prisma.reseller.findMany({
+    where: { id: { in: allowedIds }, feedUrl: { not: null }, feedRefreshedAt: { not: null } },
+    select: { id: true },
+  });
+  const readySet = new Set(feedResellers.map((r) => r.id));
+  const feedKey = (resellerId: string, ean: string) => `${resellerId} ${ean}`;
+  const feedMap = new Map<string, { stock: number | null; availability: string | null }>();
+  if (readySet.size > 0) {
+    const feedItems = await prisma.resellerFeedItem.findMany({
+      where: { resellerId: { in: [...readySet] } },
+      select: { resellerId: true, ean: true, stock: true, availability: true },
+    });
+    for (const it of feedItems) {
+      feedMap.set(feedKey(it.resellerId, it.ean), {
+        stock: it.stock,
+        availability: it.availability,
+      });
+    }
+  }
+
   // ── Agregace v paměti ──
   const resAcc = new Map<
     string,
@@ -254,8 +280,13 @@ export async function aggregateOpportunities(opts: {
     }
 
     const eff = resolver.resolve(p.ean, p.ourStock);
+    const av = effectiveAvailabilityFor(
+      r.availability,
+      feedMap.get(feedKey(r.resellerId, p.ean)),
+      readySet.has(r.resellerId),
+    );
     const category = classifyProduct(
-      { availability: r.availability, effectiveStock: eff.stock },
+      { availability: av.availability, effectiveStock: eff.stock },
       config,
     );
     if (category !== "opportunity") continue;

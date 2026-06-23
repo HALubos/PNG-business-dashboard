@@ -3,6 +3,7 @@ import {
   PackageSearch,
   Settings,
   BarChart3,
+  Store,
   ArrowRight,
   ShieldAlert,
   type LucideIcon,
@@ -23,6 +24,7 @@ const TILE_ICONS: Record<string, LucideIcon> = {
   PackageSearch,
   Settings,
   BarChart3,
+  Store,
 };
 
 export default async function DashboardHomePage({
