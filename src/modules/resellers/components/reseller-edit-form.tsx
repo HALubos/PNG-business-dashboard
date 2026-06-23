@@ -1,12 +1,14 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Save,
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
   Radio,
+  Loader2,
 } from "lucide-react";
 
 import {
@@ -36,6 +38,8 @@ interface ResellerData {
   feedConfig: string; // JSON string (prázdné = žádný)
   feedRefreshedAt: string | null;
   feedItems: number | null;
+  feedStatus: string | null; // processing | ok | error
+  feedError: string | null;
 }
 
 export function ResellerEditForm({
@@ -57,6 +61,15 @@ export function ResellerEditForm({
   >(refreshResellerFeedAction, {});
 
   const [format, setFormat] = useState(reseller.feedFormat ?? "");
+
+  // Běh na pozadí: dokud je stav „processing", průběžně načítej stránku.
+  const router = useRouter();
+  const processing = reseller.feedStatus === "processing";
+  useEffect(() => {
+    if (!processing) return;
+    const t = setInterval(() => router.refresh(), 3000);
+    return () => clearInterval(t);
+  }, [processing, router]);
 
   return (
     <div className="space-y-6">
@@ -186,11 +199,21 @@ export function ResellerEditForm({
             <Radio className="size-4" /> Feed dostupnosti
           </CardTitle>
           <CardDescription>
-            {reseller.feedRefreshedAt ? (
+            {processing ? (
+              <span className="flex items-center gap-2 text-[var(--foreground)]">
+                <Loader2 className="size-4 animate-spin" /> Zpracovává se na
+                pozadí…
+              </span>
+            ) : reseller.feedStatus === "error" ? (
+              <span className="flex items-center gap-2 text-[var(--destructive)]">
+                <AlertTriangle className="size-4" />{" "}
+                {reseller.feedError ?? "Zpracování feedu selhalo."}
+              </span>
+            ) : reseller.feedRefreshedAt ? (
               <>
                 Naposledy aktualizováno{" "}
                 {new Date(reseller.feedRefreshedAt).toLocaleString("cs-CZ")} ·{" "}
-                {reseller.feedItems ?? 0} položek.
+                {reseller.feedItems ?? 0} položek z našeho sortimentu.
               </>
             ) : (
               "Feed zatím nebyl aktualizován — dostupnost se bere z Price Checku."
@@ -204,36 +227,29 @@ export function ResellerEditForm({
               <Button
                 type="submit"
                 variant="outline"
-                disabled={refreshing || !reseller.feedUrl}
+                disabled={refreshing || processing || !reseller.feedUrl}
               >
-                <RefreshCw className={refreshing ? "animate-spin" : ""} />
-                {refreshing ? "Aktualizuji…" : "Aktualizovat feed"}
+                <RefreshCw
+                  className={refreshing || processing ? "animate-spin" : ""}
+                />
+                {processing ? "Zpracovává se…" : "Aktualizovat feed"}
               </Button>
               {!reseller.feedUrl ? (
                 <p className="mt-2 text-xs text-[var(--muted-foreground)]">
                   Nejdřív nastav a ulož Feed URL.
                 </p>
               ) : null}
+              <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                Feed se zpracuje na pozadí (uloží se jen produkty z našeho
+                sortimentu).
+              </p>
             </form>
           ) : null}
 
-          {feedState.ok ? (
-            <p className="flex items-center gap-2 text-sm text-[var(--success)]">
-              <CheckCircle2 className="size-4" /> Načteno {feedState.items}{" "}
-              položek.
-            </p>
-          ) : null}
           {feedState.error ? (
             <p className="flex items-center gap-2 text-sm text-[var(--destructive)]">
               <AlertTriangle className="size-4" /> {feedState.error}
             </p>
-          ) : null}
-          {feedState.warnings && feedState.warnings.length > 0 ? (
-            <ul className="list-inside list-disc text-xs text-[var(--warning)]">
-              {feedState.warnings.slice(0, 10).map((w, i) => (
-                <li key={i}>{w}</li>
-              ))}
-            </ul>
           ) : null}
         </CardContent>
       </Card>

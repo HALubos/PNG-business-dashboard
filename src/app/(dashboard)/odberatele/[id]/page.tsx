@@ -33,6 +33,8 @@ export default async function ResellerDetailPage({
       feedConfig: true,
       feedRefreshedAt: true,
       feedItems: true,
+      feedStatus: true,
+      feedError: true,
     },
   });
   if (!reseller) notFound();
@@ -74,6 +76,8 @@ export default async function ResellerDetailPage({
             : "",
           feedRefreshedAt: reseller.feedRefreshedAt?.toISOString() ?? null,
           feedItems: reseller.feedItems,
+          feedStatus: reseller.feedStatus,
+          feedError: reseller.feedError,
         }}
         formatOptions={formatOptions}
         canEdit={canEdit}

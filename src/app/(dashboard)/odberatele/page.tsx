@@ -23,6 +23,7 @@ export default async function OdberatelePage() {
       feedFormat: true,
       feedRefreshedAt: true,
       feedItems: true,
+      feedStatus: true,
     },
     orderBy: { domena: "asc" },
   });

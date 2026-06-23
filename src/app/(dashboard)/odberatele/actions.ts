@@ -7,7 +7,7 @@ import { can } from "@/core/rbac/access";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { canViewReseller } from "@/modules/stock/reseller-scope";
-import { refreshResellerFeed } from "@/modules/resellers/feed/feed-service";
+import { runResellerFeedJob } from "@/modules/resellers/feed/feed-service";
 import { getFeedFormat } from "@/modules/resellers/feed/formats";
 
 const RESELLERS_VIEWALL = "resellers.viewall";
@@ -76,10 +76,8 @@ export async function updateResellerAction(
 }
 
 export interface FeedRefreshState {
-  ok?: boolean;
+  started?: boolean;
   error?: string;
-  items?: number;
-  warnings?: string[];
 }
 
 export async function refreshResellerFeedAction(
@@ -90,10 +88,14 @@ export async function refreshResellerFeedAction(
   const { user, error } = await assertCanEdit(id);
   if (error) return { error };
 
-  const report = await refreshResellerFeed(id, user!.id);
+  // Spustit na POZADÍ: nastavíme stav „processing" a job odpálíme bez čekání.
+  // Zpracování velkého feedu (80+ MB) tak neblokuje request; UI poll-uje stav.
+  await prisma.reseller.update({
+    where: { id },
+    data: { feedStatus: "processing", feedError: null },
+  });
+  void runResellerFeedJob(id, user!.id);
+
   revalidatePath(`/odberatele/${id}`);
-  if (!report.ok) {
-    return { error: report.error ?? "Aktualizace feedu selhala.", warnings: report.warnings };
-  }
-  return { ok: true, items: report.items, warnings: report.warnings };
+  return { started: true };
 }

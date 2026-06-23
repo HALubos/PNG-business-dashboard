@@ -1,114 +1,120 @@
 import { prisma } from "@/lib/prisma";
-import { parseResellerFeed } from "./feed-parser";
-import type { FeedConfig } from "./formats";
+import { streamFeedBlocks } from "./feed-stream";
+import { getFeedFormat, type FeedConfig, type NormalizedFeedItem } from "./formats";
 
-export interface ResellerFeedReport {
-  resellerId: string;
-  ok: boolean;
-  items: number;
-  withAvailability: number; // položky se známým stavem dostupnosti
-  refreshedAt: Date | null;
+export interface ResellerFeedResult {
+  scanned: number; // kolik položek feed obsahoval
+  items: number; // kolik se uložilo (= shoda s naším sortimentem)
   warnings: string[];
-  error?: string;
 }
 
 const CHUNK = 2000;
 
-function fail(
-  resellerId: string,
-  error: string,
-  warnings: string[] = [],
-): ResellerFeedReport {
-  return {
-    resellerId,
-    ok: false,
-    items: 0,
-    withAvailability: 0,
-    refreshedAt: null,
-    warnings,
-    error,
-  };
+/** EANy našeho sortimentu (napříč produkty) — feed se filtruje jen na ně. */
+async function loadOurEans(): Promise<Set<string>> {
+  const rows = await prisma.product.findMany({
+    distinct: ["ean"],
+    select: { ean: true },
+  });
+  return new Set(rows.map((r) => r.ean));
 }
 
 /**
- * Stáhne feed odběratele, naparsuje zvoleným formátem a PŘEPÍŠE jeho ResellerFeedItem.
- * Chyba feedu NIKDY neházej ven (jeden vadný feed nesmí shodit nic kolem) — vrať ok:false.
+ * Stáhne a PROUDOVĚ zpracuje feed odběratele: vytáhne {ean, stock, availability}
+ * jen pro EANy z našeho sortimentu a přepíše ResellerFeedItem. Konstantní paměť.
+ * Hází jen tvrdé chyby (URL/HTTP/0 položek) — volá se z jobu na pozadí.
  */
-export async function refreshResellerFeed(
+export async function processResellerFeed(
   resellerId: string,
-  userId?: string,
-): Promise<ResellerFeedReport> {
+): Promise<ResellerFeedResult> {
   const reseller = await prisma.reseller.findUnique({
     where: { id: resellerId },
     select: { id: true, feedUrl: true, feedFormat: true, feedConfig: true },
   });
-  if (!reseller) return fail(resellerId, "Odběratel nenalezen.");
-  if (!reseller.feedUrl) {
-    return fail(resellerId, "Odběratel nemá nastavený feed URL.");
+  if (!reseller) throw new Error("Odběratel nenalezen.");
+  if (!reseller.feedUrl) throw new Error("Odběratel nemá nastavený feed URL.");
+
+  const fmt = getFeedFormat(reseller.feedFormat);
+  const config = (reseller.feedConfig as FeedConfig | null) ?? null;
+  const ourEans = await loadOurEans();
+  const warnings: string[] = [];
+
+  // Streamuj feed → extrahuj položku → filtruj na naše EANy (dedup, první vyhrává).
+  const matched = new Map<string, NormalizedFeedItem>();
+  let scanned = 0;
+  for await (const block of streamFeedBlocks(reseller.feedUrl, fmt.itemTag(config))) {
+    scanned++;
+    const it = fmt.extractItem(block, config);
+    if (!it || !it.ean) continue;
+    if (!ourEans.has(it.ean)) continue;
+    if (!matched.has(it.ean)) matched.set(it.ean, it);
   }
 
-  const warnings: string[] = [];
-  try {
-    const res = await fetch(reseller.feedUrl, { cache: "no-store" });
-    if (!res.ok) return fail(resellerId, `Feed vrátil HTTP ${res.status}.`);
-    const xml = await res.text();
-
-    const parsed = parseResellerFeed(
-      xml,
-      reseller.feedFormat,
-      (reseller.feedConfig as FeedConfig | null) ?? null,
+  if (scanned === 0) {
+    // Žádné položky = nejspíš špatný formát/URL → nepřepisuj stávající data.
+    throw new Error(
+      "Ve feedu nebyly nalezeny žádné položky — zkontrolujte formát a URL.",
     );
-    warnings.push(...parsed.warnings);
-    if (parsed.items.length === 0) {
-      // Prázdný feed nepřepisuje stávající data naslepo.
-      return fail(resellerId, "Feed neobsahuje žádné použitelné položky.", warnings);
-    }
+  }
 
-    // Přepiš položky daného odběratele (delete + recreate).
-    await prisma.resellerFeedItem.deleteMany({ where: { resellerId } });
-    for (let i = 0; i < parsed.items.length; i += CHUNK) {
-      await prisma.resellerFeedItem.createMany({
-        data: parsed.items.slice(i, i + CHUNK).map((it) => ({
-          resellerId,
-          ean: it.ean,
-          stock: it.stock,
-          availability: it.availability,
-        })),
-        skipDuplicates: true,
-      });
-    }
+  const items = [...matched.values()];
+  if (items.length === 0) {
+    warnings.push(
+      `Z ${scanned} položek feedu se žádná neshoduje s naším sortimentem.`,
+    );
+  }
 
-    const refreshedAt = new Date();
-    const withAvailability = parsed.items.filter(
-      (i) => i.availability !== null || (i.stock ?? 0) > 0,
-    ).length;
+  // Přepiš položky daného odběratele.
+  await prisma.resellerFeedItem.deleteMany({ where: { resellerId } });
+  for (let i = 0; i < items.length; i += CHUNK) {
+    await prisma.resellerFeedItem.createMany({
+      data: items.slice(i, i + CHUNK).map((it) => ({
+        resellerId,
+        ean: it.ean,
+        stock: it.stock,
+        availability: it.availability,
+      })),
+      skipDuplicates: true,
+    });
+  }
 
+  return { scanned, items: items.length, warnings };
+}
+
+/**
+ * Job na POZADÍ: zpracuje feed a nastaví stav na odběrateli. NIKDY nehází ven
+ * (volá se detached přes `void runResellerFeedJob(...)`).
+ */
+export async function runResellerFeedJob(
+  resellerId: string,
+  userId?: string,
+): Promise<void> {
+  try {
+    const r = await processResellerFeed(resellerId);
     await prisma.reseller.update({
       where: { id: resellerId },
-      data: { feedRefreshedAt: refreshedAt, feedItems: parsed.items.length },
+      data: {
+        feedStatus: "ok",
+        feedError: null,
+        feedRefreshedAt: new Date(),
+        feedItems: r.items,
+      },
     });
     await prisma.auditLog.create({
       data: {
         userId: userId ?? null,
         akce: "resellers.feed",
         entita: `Reseller:${resellerId}`,
-        detail: { items: parsed.items.length, withAvailability },
+        detail: { scanned: r.scanned, items: r.items, warnings: r.warnings },
       },
     });
-
-    return {
-      resellerId,
-      ok: true,
-      items: parsed.items.length,
-      withAvailability,
-      refreshedAt,
-      warnings,
-    };
   } catch (e) {
-    return fail(
-      resellerId,
-      e instanceof Error ? e.message : "Aktualizace feedu selhala.",
-      warnings,
-    );
+    const msg = e instanceof Error ? e.message : "Zpracování feedu selhalo.";
+    await prisma.reseller
+      .update({
+        where: { id: resellerId },
+        data: { feedStatus: "error", feedError: msg },
+      })
+      .catch(() => {});
   }
 }

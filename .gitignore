@@ -48,9 +48,10 @@ next-env.d.ts
 /data/sample/*
 !/data/sample/.gitkeep
 
-# žádné Excel soubory do gitu (obsahují reálná data odběratelů/ceny)
+# žádné Excel/feed soubory do gitu (obsahují reálná data odběratelů/ceny, jsou velké)
 *.xlsx
 ~$*.xlsx
+*.xml
 
 # Claude Code lokální nastavení (osobní, ne do repa)
 .claude/settings.local.json

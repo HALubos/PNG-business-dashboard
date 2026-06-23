@@ -107,7 +107,9 @@ model Reseller {
   feedFormat      String? // "heureka" | "google" | "interni" | "ostatni"
   feedConfig      Json? // ruční mapování — relevantní jen pro "ostatni"
   feedRefreshedAt DateTime?
-  feedItems       Int?
+  feedItems       Int? // počet uložených (= našich) položek z feedu
+  feedStatus      String? // "processing" | "ok" | "error" (běh na pozadí)
+  feedError       String? // poslední chyba zpracování
   feedFeedItems   ResellerFeedItem[]
 }
 

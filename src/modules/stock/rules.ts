@@ -141,9 +141,14 @@ export function effectiveAvailabilityFor(
   feedReady: boolean,
 ): EffectiveAvailability {
   if (feedReady && feedItem) {
+    // Chybí-li textový stav, odvoď z ks: >0 skladem · =0 vyprodáno · null neuvedeno.
     const availability =
       feedItem.availability ??
-      (feedItem.stock !== null && feedItem.stock > 0 ? "skladem" : null);
+      (feedItem.stock === null
+        ? null
+        : feedItem.stock > 0
+          ? "skladem"
+          : "vyprodáno");
     return { availability, stock: feedItem.stock, source: "feed" };
   }
   return { availability: priceCheckAvailability, stock: null, source: "pricecheck" };

@@ -7,7 +7,8 @@ export const OWN_SHOP_DOMAINS = [
   "pinguin-shop.cz",
 ];
 
-// Všechny hodnoty dostupnosti vyskytující se v Price Checku (§5.2 zadání).
+// Známé hodnoty dostupnosti: z Price Checku (§5.2) + z feedů odběratelů.
+// `vyprodáno` = explicitní „out of stock" z feedu (≠ „neuvedeno"/null = neznámé).
 export const KNOWN_AVAILABILITY_STATES = [
   "skladem",
   "do 3 dnů",
@@ -15,6 +16,7 @@ export const KNOWN_AVAILABILITY_STATES = [
   "two_weeks",
   "do měsíce",
   "info v obchodu",
+  "vyprodáno",
 ];
 
 // Default „dostupné" stavy — vše ostatní = kandidát na nabídku (§3.7, §5.4).

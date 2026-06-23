@@ -2,7 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Radio, CircleSlash, ChevronRight } from "lucide-react";
+import {
+  Search,
+  Radio,
+  CircleSlash,
+  ChevronRight,
+  Loader2,
+  AlertTriangle,
+} from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +31,7 @@ export interface ResellerRow {
   feedFormat: string | null;
   feedRefreshedAt: string | null; // ISO
   feedItems: number | null;
+  feedStatus: string | null; // processing | ok | error
 }
 
 function FeedStatus({ r }: { r: ResellerRow }) {
@@ -32,6 +40,20 @@ function FeedStatus({ r }: { r: ResellerRow }) {
       <span className="inline-flex items-center gap-1 text-[var(--muted-foreground)]">
         <CircleSlash className="size-3.5" /> bez feedu
       </span>
+    );
+  }
+  if (r.feedStatus === "processing") {
+    return (
+      <Badge variant="secondary">
+        <Loader2 className="mr-1 size-3 animate-spin" /> zpracovává se
+      </Badge>
+    );
+  }
+  if (r.feedStatus === "error") {
+    return (
+      <Badge variant="warning">
+        <AlertTriangle className="mr-1 size-3" /> chyba
+      </Badge>
     );
   }
   if (!r.feedRefreshedAt) {

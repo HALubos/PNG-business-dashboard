@@ -43,8 +43,11 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
   (`src/modules/resellers/feed/formats.ts`: heureka / google / interni / ostatni →
   `feedConfig`). Pravidlo sdílené v `rules.ts` (`effectiveAvailabilityFor` +
   `createResellerAvailabilityResolver`); zapojené do `stock` i `analytics` headline
-  (trend zůstává na verzovaném Price Checku). Stránky `/odberatele` (+ detail/edit),
-  service `refreshResellerFeed`. Náš skladový feed (`OurStockItem`) je oddělený.
+  (trend zůstává na verzovaném Price Checku). Stránky `/odberatele` (+ detail/edit).
+  **Feed se zpracovává PROUDOVĚ** (`feed-stream.ts` — bez DOM, ~300 MB i na 144 MB
+  feedu) a ukládá **jen EANy z našeho sortimentu** (makalu: 536 z 32 705). Běží
+  **na pozadí** (`runResellerFeedJob`, detached z akce) se stavem `feedStatus`
+  (`processing`/`ok`/`error`); UI pollu­je. Náš skladový feed (`OurStockItem`) je oddělený.
 - **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka jako úplně nové listingy, automatické
   (cron) stahování feedů, produkční hosting. Nové moduly se přidávají na zadání.
 
@@ -122,7 +125,13 @@ Pro zvoleného odběratele zobraz produkty, kde současně platí (vyhodnocuje `
    (sortiment je z Price Checku — i ve v1 s feedy).
 3. **Odběratel nemá dostupné:** jeho **efektivní** `Availability` **NENÍ** v `availableStates`
    (default `{skladem, do 3 dnů}`). Efektivní dostupnost = feed odběratele → fallback Price
-   Check. Nedostupné = `do týdne`, `two_weeks`, `do měsíce`, `info v obchodu`, nebo chybí.
+   Check. Nedostupné = `do týdne`, `two_weeks`, `do měsíce`, `info v obchodu`, `vyprodáno`, nebo chybí.
+
+**Vokabulář stavů** (`KNOWN_AVAILABILITY_STATES` v `src/modules/stock/constants.ts`):
+`skladem`, `do 3 dnů`, `do týdne`, `two_weeks`, `do měsíce`, `info v obchodu`, **`vyprodáno`**.
+Feedy normalizují své hodnoty na tento vokabulář (Google `out of stock`→`vyprodáno`,
+`in stock`→`skladem`; interní `0 ks`→`vyprodáno`). **`vyprodáno` = explicitní „není skladem"
+z feedu**, ≠ `null`/„neuvedeno" (= stav neznámý). Oba jsou „nedostupné" (kandidát na nabídku).
 
 Spojovací klíč produktů = **EAN**. **Naše vlastní e-shopy** (pinguin.cz, activent.cz,
 acepac.bike, pinguin-shop.cz) označ jako vlastní a **nepočítej je jako odběratele**.
@@ -160,7 +169,7 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  │  └─ rbac/                # access.ts (can/assert), permissions.ts
 │  ├─ modules/stock/          # constants, opportunities, rules, reseller-scope, import/, feed/, components/
 │  ├─ modules/analytics/      # aggregate (žebříčky + trend), components/
-│  ├─ modules/resellers/      # feed/ (formats registr + parser + service), components/
+│  ├─ modules/resellers/      # feed/ (formats registr + feed-stream + service, proudově), components/
 │  ├─ components/{ui,dashboard}/
 │  ├─ lib/{prisma,utils}.ts
 │  └─ generated/prisma/       # generovaný Prisma klient (mimo git)
