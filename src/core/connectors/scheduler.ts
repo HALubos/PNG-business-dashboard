@@ -1,0 +1,55 @@
+import { prisma } from "@/lib/prisma";
+import { runConnectorSync } from "./sync";
+
+// ─────────────────────────────────────────────────────────────
+// Lehký IN-PROCESS scheduler. Periodicky spustí sync všech aktivních konektorů,
+// které zrovna neběží. Interval je konfigurovatelný přes .env
+// (MARKETING_SYNC_INTERVAL_MIN, default 60). Automatizace je pro MARKETING
+// povolena (odchylka od „zákazu cronu" v obchodní větvi).
+//
+// Pozn.: cron/produkční scheduling = fáze 2+. Tohle je in-process tikání,
+// spuštěné přes instrumentation (jen v node runtime, jednou na proces).
+// ─────────────────────────────────────────────────────────────
+
+let timer: ReturnType<typeof setInterval> | null = null;
+
+function intervalMs(): number {
+  const min = Number(process.env.MARKETING_SYNC_INTERVAL_MIN);
+  const safe = Number.isFinite(min) && min > 0 ? min : 60;
+  return safe * 60_000;
+}
+
+/** Jeden tik: najde aktivní konektory mimo stav „processing" a spustí jejich sync. */
+async function tick(): Promise<void> {
+  try {
+    const due = await prisma.connector.findMany({
+      where: { active: true, syncStatus: { not: "processing" } },
+      select: { id: true },
+    });
+    for (const c of due) {
+      await prisma.connector.update({
+        where: { id: c.id },
+        data: { syncStatus: "processing", lastError: null },
+      });
+      void runConnectorSync(c.id);
+    }
+  } catch {
+    // Scheduler nesmí shodit proces — chyby jednoho tiku ignorujeme.
+  }
+}
+
+/** Spustí scheduler (idempotentně — opakované volání nic neudělá). */
+export function startConnectorScheduler(): void {
+  if (timer) return;
+  timer = setInterval(() => void tick(), intervalMs());
+  // Nedrží proces naživu kvůli scheduleru.
+  if (typeof timer.unref === "function") timer.unref();
+}
+
+/** Zastaví scheduler (pro úplnost / testy). */
+export function stopConnectorScheduler(): void {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}

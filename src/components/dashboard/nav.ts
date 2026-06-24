@@ -11,3 +11,10 @@ export interface NavUser {
   email: string;
   roleName: string;
 }
+
+/** Sekce navigace s volitelným nadpisem skupiny (Obchod / Marketing). */
+export interface NavGroup {
+  /** Nadpis sekce; `null` = bez nadpisu (např. „Přehled", „Administrace"). */
+  label: string | null;
+  items: NavItem[];
+}

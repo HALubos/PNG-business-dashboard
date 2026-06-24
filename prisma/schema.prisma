@@ -236,3 +236,85 @@ model OurStockItem {
   stock7d   Int      @default(0) // availability7d (příjem do 7 dnů)
   updatedAt DateTime @updatedAt
 }
+
+// ─────────────────────────────────────────────────────────────
+// MARKETINGOVÁ VĚTEV — jádro (fáze A)
+// Projekt = značka (kontejner pro konektory a metriky). Konektory stahují
+// data z externích zdrojů (URL feed / OAuth API) a normalizují je na kanonické
+// metriky (MetricFact). Odvozená KPI se počítají až nad kanonikou (kpi.ts).
+// Automatizace (scheduler) je pro marketing povolena — odchylka od „zákazu cronu".
+// ─────────────────────────────────────────────────────────────
+
+// Projekt = naše značka (Pinguin / Acepac / Activent).
+model Project {
+  id         String       @id @default(cuid())
+  klic       String       @unique // "pinguin" | "acepac" | "activent"
+  nazev      String
+  web        String? // doména webu (pro pozdější AI profil)
+  createdAt  DateTime     @default(now())
+  connectors Connector[]
+  metrics    MetricFact[]
+}
+
+// Rodina zdroje: URL feed (pull, bez OAuth) vs. OAuth API (token + refresh).
+enum ConnectorKind {
+  url_feed
+  oauth_api
+}
+
+// Konkrétní typ konektoru (= klíč adaptéru v registru).
+enum ConnectorType {
+  shoptet_orders
+  meta_ads
+  google_ads
+  sklik
+  ga4
+}
+
+// Stav synchronizace (vzor jako Reseller.feedStatus).
+enum SyncStatus {
+  idle
+  processing
+  ok
+  error
+}
+
+// Připojený konektor pro daný projekt. Tokeny se ukládají ŠIFROVANĚ (crypto.ts),
+// nikdy plaintext. Stav syncu se sleduje stejně jako u feedu odběratele.
+model Connector {
+  id             String        @id @default(cuid())
+  projectId      String
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind           ConnectorKind
+  type           ConnectorType
+  nazev          String
+  // url_feed:
+  feedUrl        String?
+  // oauth_api (ŠIFROVANĚ at-rest — nikdy plaintext do DB):
+  credentialsEnc String? // šifrovaný JSON s tokeny/refresh
+  // stav syncu:
+  syncStatus     SyncStatus    @default(idle)
+  lastSyncAt     DateTime?
+  lastError      String?
+  cursor         String? // inkrement (Shoptet updateTimeFrom; API since)
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+
+  @@unique([projectId, type])
+  @@index([projectId])
+}
+
+// Kanonická metrika (atomická, NE odvozená) — denní granularita, per projekt+zdroj.
+// Klíče: cost, revenue, impressions, clicks, conversions, sessions, users.
+model MetricFact {
+  id        String        @id @default(cuid())
+  projectId String
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source    ConnectorType // odkud metrika je
+  date      DateTime      @db.Date // denní granularita
+  metric    String // jeden z kanonických klíčů
+  value     Float
+
+  @@unique([projectId, source, date, metric])
+  @@index([projectId, date])
+}

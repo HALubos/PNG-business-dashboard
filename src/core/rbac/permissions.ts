@@ -35,6 +35,20 @@ export const CORE_PERMISSIONS: PermissionDescriptor[] = [
     akce: "view",
     popis: "Zobrazení auditního logu",
   },
+  // Marketingová větev: konektory a projekty jsou sdílená infrastruktura →
+  // jejich správa patří do administrace jádra (ne dovnitř jednoho modulu).
+  {
+    klic: "admin.connectors",
+    moduleKey: "admin",
+    akce: "admin",
+    popis: "Správa konektorů (integrace)",
+  },
+  {
+    klic: "admin.projects",
+    moduleKey: "admin",
+    akce: "admin",
+    popis: "Správa projektů (značek)",
+  },
 ];
 
 /** Klíč modulu „admin" pro navigaci administrace. */

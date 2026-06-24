@@ -48,8 +48,36 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
   feedu) a ukládá **jen EANy z našeho sortimentu** (makalu: 536 z 32 705). Běží
   **na pozadí** (`runResellerFeedJob`, detached z akce) se stavem `feedStatus`
   (`processing`/`ok`/`error`); UI pollu­je. Náš skladový feed (`OurStockItem`) je oddělený.
+- **Marketingová větev — Fáze A (jádro) HOTOVO.** Aditivní rozšíření jádra na
+  interní přehledový systém (po vzoru primio.one), bez zásahu do obchodních modulů.
+  - **Skupiny menu:** `ModuleDefinition.group` (`obchod` | `marketing`, default
+    `obchod`), `modulesByGroup()` v registru, navigace vykresluje sekce
+    (`GROUP_LABELS`/`GROUP_ORDER` v `src/core/modules/types.ts`).
+  - **Projekt = značka** (`Project`, klíče `pinguin`/`acepac`/`activent`, seedováno).
+    Scope `src/core/projects/project-scope.ts` (vzor `reseller-scope.ts`).
+  - **Konektor vrstva** `src/core/connectors/`: modely `Connector` + enumy
+    `ConnectorKind`/`ConnectorType`/`SyncStatus`, abstrakce `ConnectorAdapter`
+    (vč. katalogových metadat) a registr adaptérů (`registry.ts`). Adaptéry
+    (`shoptet_orders`, `ga4`, `google_ads`, `meta_ads`, `sklik`) jsou zatím
+    **placeholdery** (`sync()` vrací prázdno; OAuth = „brzy", disabled).
+  - **Kanonika metrik** `metrics.ts` (`CANONICAL_METRICS`: cost/revenue/impressions/
+    clicks/conversions/sessions/users) + model `MetricFact`. **Odvozená KPI**
+    (ROAS/PNO/konverzní poměr) v `kpi.ts` — JEDINÉ místo (anti-drift), vč.
+    pravidla priority tržeb (e-shop `overridesRevenue` přebíjí GA4).
+  - **Scheduler** `scheduler.ts` (in-process, interval `MARKETING_SYNC_INTERVAL_MIN`,
+    start přes `src/instrumentation.ts`) + `runConnectorSync` (`sync.ts`) podle
+    `runResellerFeedJob` (detached, `syncStatus`, `cursor`, upsert `MetricFact`,
+    backfill `MARKETING_BACKFILL_FROM`). Zatím **dry-run**.
+  - **RBAC + secrets:** práva `admin.connectors` / `admin.projects` v
+    `CORE_PERMISSIONS`; tokeny šifrované at-rest (`crypto.ts`, `CONNECTOR_ENC_KEY`).
+  - **Stránka Integrace** (`/integrace`, právo `admin.connectors`): katalog karet
+    z registru adaptérů, přepínač projektu, stav připojení (polling),
+    připojit/odpojit/aktualizovat, hláška o backfillu, štítek „přebíjí GA4".
+- **Marketing — Fáze B/C — NEDĚLAT bez zadání:** reálné `sync()` adaptérů
+  (Shoptet, GA4, Google/Meta Ads, Sklik), OAuth flow, moduly `mkt_ads`/`mkt_analytics`.
 - **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka jako úplně nové listingy, automatické
-  (cron) stahování feedů, produkční hosting. Nové moduly se přidávají na zadání.
+  (cron) stahování feedů **v obchodní větvi**, produkční hosting. Nové moduly se
+  přidávají na zadání.
 
 ### Klíčová technická rozhodnutí (odchylky od původní specifikace)
 
@@ -90,6 +118,20 @@ ho stock i analytics i resellers — opět neduplikovat.
 
 **Trend v analytice** = verzovaný Price Check (`Product.ourStock` + surová `availability`
 obou snapshotů) — živé feedy se NEverzují, do trendu nevstupují.
+
+**Marketing — sdílené vzory (anti-drift, NEduplikovat):**
+- **Kanonika metrik** `src/core/connectors/metrics.ts` = slovník atomických metrik
+  (zdroj pravdy). Adaptér mapuje syrová data na ně → `MetricFact` (per projekt+zdroj+den).
+- **Odvozená KPI** `src/core/connectors/kpi.ts` = JEDINÉ místo výpočtu ROAS/PNO/
+  konverzního poměru a **pravidla priority tržeb** (e-shop s `overridesRevenue`
+  přebíjí GA4). Moduly marketingu volají odsud, nikdy nepočítají KPI per-konektor.
+- **Registr adaptérů** `src/core/connectors/registry.ts` — nový konektor = jeden
+  adaptér v `adapters/` + řádek v registru. Katalog (Integrace) i běhová smyčka
+  (`sync.ts`) čtou ze stejného registru. Adaptér nese i katalogová metadata.
+- **Sync na pozadí** `src/core/connectors/sync.ts` (`runConnectorSync`/`startConnectorSync`)
+  = přesná obdoba `runResellerFeedJob` (detached, `syncStatus`, `cursor`, upsert).
+- **Scope projektů** `src/core/projects/project-scope.ts` = obdoba `reseller-scope.ts`
+  (`getVisibleProjects`/`canViewProject`, klíč práva `<modul>.viewall`).
 
 ## Terminologie (důležité)
 
@@ -148,12 +190,14 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 ```
 /
 ├─ docker-compose.yml         # lokální PostgreSQL
-├─ .env.example / .env.local  # env (DATABASE_URL, AUTH_SECRET, SEED_*, STOCK_FEED_URL)
+├─ .env.example / .env.local  # env (DATABASE_URL, AUTH_SECRET, SEED_*, STOCK_FEED_URL,
+│                             #   CONNECTOR_ENC_KEY, MARKETING_SYNC_INTERVAL_MIN, MARKETING_BACKFILL_FROM)
 ├─ prisma.config.ts           # Prisma 7 config (URL pro migrace + seed)
 ├─ ZADANI-dashboard-v1.md     # plné zadání · CLAUDE.md · README.md
 ├─ prisma/
 │  ├─ schema.prisma           # User, Role, Permission, Module, Reseller(+feed), RepCustomer, AuditLog,
-│  │                          #   ImportSnapshot, Product, ResellerProductAvailability, StockConfig, OurStockItem, ResellerFeedItem
+│  │                          #   ImportSnapshot, Product, ResellerProductAvailability, StockConfig, OurStockItem, ResellerFeedItem,
+│  │                          #   Project, Connector, MetricFact (+ enumy ConnectorKind/ConnectorType/SyncStatus)
 │  ├─ migrations/             # SQL migrace
 │  └─ seed.ts                 # admin Lubos + 3 zástupci + role/práva + modul + StockConfig
 ├─ src/
@@ -161,16 +205,19 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  ├─ app/
 │  │  ├─ (auth)/login/        # přihlášení + server action
 │  │  ├─ (dashboard)/         # layout s navigací dle práv
-│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/ · odberatele/
+│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/ · odberatele/ · integrace/
 │  │  └─ api/{auth,stock/export,analytics/export}/
+│  ├─ instrumentation.ts      # start in-process scheduleru konektorů (Node runtime)
 │  ├─ core/
 │  │  ├─ auth/                # auth.config.ts, auth.ts, session.ts, password.ts
-│  │  ├─ modules/             # registry.ts (REGISTR), types.ts, stock|analytics|resellers/module.ts
-│  │  └─ rbac/                # access.ts (can/assert), permissions.ts
+│  │  ├─ modules/             # registry.ts (REGISTR + modulesByGroup), types.ts (+ group/GROUP_LABELS)
+│  │  ├─ projects/            # project-scope.ts (scope značek)
+│  │  ├─ connectors/          # types (adaptér+katalog), registry, adapters/, metrics, kpi, sync, scheduler, crypto
+│  │  └─ rbac/                # access.ts (can/assert), permissions.ts (+ admin.connectors/projects)
 │  ├─ modules/stock/          # constants, opportunities, rules, reseller-scope, import/, feed/, components/
 │  ├─ modules/analytics/      # aggregate (žebříčky + trend), components/
 │  ├─ modules/resellers/      # feed/ (formats registr + feed-stream + service, proudově), components/
-│  ├─ components/{ui,dashboard}/
+│  ├─ components/{ui,dashboard,integrace}/
 │  ├─ lib/{prisma,utils}.ts
 │  └─ generated/prisma/       # generovaný Prisma klient (mimo git)
 └─ data/sample/               # vzorový Price Check XLSX (mimo git)
@@ -206,8 +253,15 @@ automaticky při importu XLSX. Cron automatizace = fáze 2.
 
 ## Co teď NEdělat (fáze 2+)
 
-Vario integrace, Heureka, **automatické stahování** Price Checku / feedu (cron),
-produkční hosting a citlivost dat. To je fáze 2+ — bez výslovného zadání neřešit.
+Vario integrace, Heureka, **automatické stahování** Price Checku / feedu **v
+obchodní větvi** (cron), produkční hosting a citlivost dat. To je fáze 2+ — bez
+výslovného zadání neřešit.
+
+> **Revize rozhodnutí o automatizaci:** pro **marketingovou větev** je
+> automatizace (in-process scheduler, pull feedy, OAuth API) **povolena** —
+> mění to dosavadní „zákaz cronu ve fázi 2", ale jen pro marketing. Plné zadání
+> a fáze marketingu viz `docs/marketing/navrh-architektury-marketing.md`.
 
 Nové **moduly** se naopak přidávají na zadání (tak vznikl `analytics`) — vždy přes
-registraci (viz „Přidání nového modulu"), nikdy zásahem do jádra.
+registraci (viz „Přidání nového modulu"), nikdy zásahem do jádra. Nové **konektory**
+se přidávají přes registr adaptérů (`src/core/connectors/registry.ts`).

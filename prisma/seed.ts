@@ -39,6 +39,13 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
 };
 
+// Marketingové projekty = naše značky.
+const PROJECTS = [
+  { klic: "pinguin", nazev: "Pinguin", web: "pinguin.cz" },
+  { klic: "acepac", nazev: "Acepac", web: "acepac.bike" },
+  { klic: "activent", nazev: "Activent", web: "activent.cz" },
+];
+
 // Naše vlastní e-shopy — nepočítají se jako odběratelé (§5.2 zadání).
 const OWN_SHOPS = ["pinguin.cz", "activent.cz", "acepac.bike", "pinguin-shop.cz"];
 // Pár demo odběratelů (skutečné domény z exportu) pro fázi 0.
@@ -101,6 +108,16 @@ async function main() {
   }
   const moduleRows = await prisma.module.findMany();
   console.log(`  ✓ moduly: ${allModules().map((m) => m.key).join(", ")}`);
+
+  // ── Marketingové projekty (značky) ─────────────────────
+  for (const p of PROJECTS) {
+    await prisma.project.upsert({
+      where: { klic: p.klic },
+      update: { nazev: p.nazev, web: p.web },
+      create: p,
+    });
+  }
+  console.log(`  ✓ projekty: ${PROJECTS.map((p) => p.klic).join(", ")}`);
 
   // ── Odběratelé (vlastní e-shopy + demo) ────────────────
   for (const d of OWN_SHOPS) {

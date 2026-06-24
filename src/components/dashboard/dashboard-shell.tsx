@@ -9,6 +9,9 @@ import {
   Settings,
   BarChart3,
   Store,
+  Plug,
+  Megaphone,
+  LineChart,
   Menu,
   LogOut,
   ChevronDown,
@@ -31,7 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { NavItem, NavUser } from "./nav";
+import type { NavItem, NavGroup, NavUser } from "./nav";
 import { logoutAction } from "@/app/(dashboard)/logout-action";
 
 const ICONS: Record<string, LucideIcon> = {
@@ -40,6 +43,9 @@ const ICONS: Record<string, LucideIcon> = {
   Settings,
   BarChart3,
   Store,
+  Plug,
+  Megaphone,
+  LineChart,
 };
 
 function iconFor(name: string): LucideIcon {
@@ -92,6 +98,35 @@ function NavLinks({
   );
 }
 
+function NavSections({
+  groups,
+  pathname,
+  onNavigate,
+}: {
+  groups: NavGroup[];
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      {groups.map((group, i) => (
+        <div key={group.label ?? `g${i}`} className="flex flex-col gap-1">
+          {group.label ? (
+            <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+              {group.label}
+            </p>
+          ) : null}
+          <NavLinks
+            items={group.items}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Brand() {
   return (
     <div className="flex items-center gap-2 px-1 py-2">
@@ -108,11 +143,11 @@ function Brand() {
 
 export function DashboardShell({
   user,
-  navItems,
+  navGroups,
   children,
 }: {
   user: NavUser;
-  navItems: NavItem[];
+  navGroups: NavGroup[];
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -124,7 +159,7 @@ export function DashboardShell({
       <aside className="hidden w-64 shrink-0 border-r border-[var(--border)] bg-[var(--card)] p-3 md:flex md:flex-col">
         <Brand />
         <div className="mt-4">
-          <NavLinks items={navItems} pathname={pathname} />
+          <NavSections groups={navGroups} pathname={pathname} />
         </div>
       </aside>
 
@@ -143,8 +178,8 @@ export function DashboardShell({
                 <SheetTitle className="sr-only">Navigace</SheetTitle>
                 <Brand />
                 <div className="mt-4">
-                  <NavLinks
-                    items={navItems}
+                  <NavSections
+                    groups={navGroups}
                     pathname={pathname}
                     onNavigate={() => setMobileOpen(false)}
                   />
