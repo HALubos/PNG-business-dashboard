@@ -77,12 +77,14 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
     připojit/odpojit/aktualizovat, hláška o backfillu, štítek „přebíjí GA4".
 - **Marketingová větev — Dávka 2 (Shoptet tržby + modul Reklamní výkon) HOTOVO.**
   - **Adaptér `shoptet_orders` (reálný `sync()`)** — `src/core/connectors/adapters/
-    shoptet-orders.ts`. Proudově stáhne export objednávek z `connector.feedUrl`
-    (vzor `feed-stream.ts`, tag `<order>` — `streamFeedBlocks` snáší i atributy
-    `<order code="…">`), z každé objednávky vezme datum a **order-level** cenu vč. DPH
-    (nejdřív odřízne pod-stromy s vlastní cenou — položky/doprava/platba/slevy —, pak
-    preferuje explicitní pole `priceWithVat`/`totalPrice` před obecným `<price>`),
-    agreguje na **denní** `revenue` (suma) + `conversions` (počet objednávek) →
+    shoptet-orders.ts`. Proudově stáhne export objednávek z `connector.feedUrl` (vzor
+    `feed-stream.ts`). **Formát Shoptetu** (ověřeno proti reálnému exportu, pattern
+    objednávek): kořen `<ORDERS>`, položka `<ORDER>` (VELKÝMI — `streamFeedBlocks` to
+    odliší od `<ORDER_ID>`/`<ORDER_ITEMS>` lookaheadem `[\s/>]`), datum `<DATE>`,
+    order-level celek `<TOTAL_PRICE><WITH_VAT>`. Položky `<ORDER_ITEMS>`/`<ITEM>` mají
+    VLASTNÍ `<TOTAL_PRICE>`/`<UNIT_PRICE>` → před čtením celku se odříznou. Pole se čtou
+    case-insensitive, s fallbacky pro jiné šablony. Agreguje na **denní** `revenue`
+    (suma cen vč. DPH) + `conversions` (počet objednávek) →
     `MetricFact` (`source = shoptet_orders`, `overridesRevenue = true`). **Tripwiry**
     (po vzoru `processResellerFeed`): první sync bez `<order>` → chyba; bloky jsou, ale
     0 načteno → chyba „zkontrolujte mapování polí"; inkrement bez novinek → prázdno.

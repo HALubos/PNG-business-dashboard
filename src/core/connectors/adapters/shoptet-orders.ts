@@ -25,7 +25,9 @@ import { streamFeedBlocks } from "@/modules/resellers/feed/feed-stream";
 // pro přesné přepočty by byla potřeba per-objednávková tabulka; mimo rozsah MVP.)
 // ─────────────────────────────────────────────────────────────
 
-const ORDER_TAG = "order";
+// Shoptet order export: kořen <ORDERS>, položka <ORDER> (VELKÝMI). Lookahead
+// `[\s/>]` ve streamFeedBlocks odliší <ORDER> od <ORDER_ID>/<ORDER_ITEMS>.
+const ORDER_TAG = "ORDER";
 
 /** Obsah tagu z bloku (ošetří atributy i CDATA). Krátké, jednoúrovňové tagy. */
 function tag(block: string, name: string): string | null {
@@ -59,20 +61,18 @@ interface ParsedOrder {
   revenue: number;
 }
 
-// Pod-stromy objednávky, které mají vlastní `<price>`/`<withVat>` (položky, doprava,
-// platba, slevy). Odřízneme je, aby zbylé order-level `<price>` nešlo zaměnit s cenou
-// dopravy/platby — jinak by `tag(head,"price")` mohlo vzít první (= NE order total).
-// Názvy dle exportu objednávek Shoptetu, tolerantně (v repu není vzorový soubor).
+// Pod-stromy objednávky, které mají VLASTNÍ cenu (`<TOTAL_PRICE>`/`<UNIT_PRICE>` u
+// položek apod.). Odřízneme je, aby zbylé order-level `<TOTAL_PRICE>` nešlo zaměnit
+// s cenou položky/dopravy. V Shoptet šabloně je klíčový `<ORDER_ITEMS>` (každý
+// `<ITEM>` má vlastní `<TOTAL_PRICE><WITH_VAT>`); ostatní jsou fallbacky pro jiné
+// šablony. (`tag()` je case-insensitive, ale názvy musí sedět — proto VELKÁ s `_`.)
 const NESTED_PRICE_CONTAINERS = [
-  "orderItems",
-  "shippingDetails",
-  "billingDetails",
+  "ORDER_ITEMS", // Shoptet: obal položek objednávky
+  "ITEM", // jednotlivá položka (kdyby byla bez obalu)
+  // fallbacky pro odlišné šablony:
   "shipping",
   "billing",
   "payment",
-  "paymentMethod",
-  "shippingMethod",
-  "discountCoupon",
   "discount",
 ];
 
@@ -90,16 +90,16 @@ function stripNestedPrices(block: string): string {
  * obecný `<price>` (po odříznutí pod-stromů by měl být už jen order-level).
  */
 function orderTotalWithVat(head: string): number | null {
-  // 1) ploché celkové pole
-  const flat = toNum(tag(head, "priceWithVat") ?? tag(head, "totalWithVat"));
-  if (flat !== null) return flat;
-  // 2) explicitní kontejner totalu
-  const total = tag(head, "totalPrice");
+  // 1) Shoptet: <TOTAL_PRICE><WITH_VAT>…</WITH_VAT></TOTAL_PRICE> = celek objednávky.
+  //    (`WITH_VAT` se s `WITHOUT_VAT` neplete — `<WITH_VAT` literal v `<WITHOUT_VAT>` není.)
+  const total = tag(head, "TOTAL_PRICE");
   if (total) {
-    const v = toNum(tag(total, "withVat"));
+    const v = toNum(tag(total, "WITH_VAT"));
     if (v !== null) return v;
   }
-  // 3) obecný order-level <price>
+  // 2) fallbacky pro jiné šablony: ploché pole, pak obecný <price>.
+  const flat = toNum(tag(head, "priceWithVat") ?? tag(head, "totalWithVat"));
+  if (flat !== null) return flat;
   const price = tag(head, "price");
   if (price) {
     const v = toNum(tag(price, "withVat"));
@@ -109,7 +109,7 @@ function orderTotalWithVat(head: string): number | null {
 }
 
 /**
- * Z jednoho `<order>` bloku vytáhne datum objednávky a celkovou cenu vč. DPH.
+ * Z jednoho `<ORDER>` bloku vytáhne datum objednávky a celkovou cenu vč. DPH.
  * Nejdřív odřízne pod-stromy s vlastní cenou (položky/doprava/platba/slevy), pak
  * čte order-level total. Názvy polí odpovídají exportu objednávek Shoptetu;
  * bereme i běžné alternativy (v repu není vzorový soubor → tolerantní pořadí).
@@ -118,7 +118,7 @@ function parseOrder(block: string): ParsedOrder | null {
   const head = stripNestedPrices(block);
 
   const date = parseDate(
-    tag(head, "creationTime") ?? tag(head, "date") ?? tag(head, "changeTime"),
+    tag(head, "DATE") ?? tag(head, "creationTime") ?? tag(head, "changeTime"),
   );
   if (!date) return null;
 
@@ -156,7 +156,7 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
 
     // Agregace na den: revenue (suma cen vč. DPH) + conversions (počet objednávek).
     const byDay = new Map<number, { revenue: number; orders: number }>();
-    let scanned = 0; // počet <order> bloků ve feedu
+    let scanned = 0; // počet <ORDER> bloků ve feedu
     let parsed = 0; // z toho úspěšně načtených (datum + cena)
     for await (const block of streamFeedBlocks(url, ORDER_TAG)) {
       scanned++;
@@ -178,7 +178,7 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
     if (scanned === 0) {
       if (isFirstSync) {
         throw new Error(
-          "Feed nevrátil žádné objednávky (element <order>) — zkontrolujte formát exportu a URL.",
+          "Feed nevrátil žádné objednávky (element <ORDER>) — zkontrolujte formát exportu a URL.",
         );
       }
       return []; // inkrement: nic nového od posledního cursoru
