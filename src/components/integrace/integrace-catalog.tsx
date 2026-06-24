@@ -252,6 +252,25 @@ function CardItem({
               </p>
             ) : null}
           </form>
+        ) : card.kind === "oauth_api" && card.type === "ga4" ? (
+          // GA4 = první OAuth konektor. Formulář (GET) předá Property ID start
+          // route, ta přesměruje na Google consent; tokeny uloží callback.
+          <form method="get" action="/api/connectors/ga4/start" className="space-y-2">
+            <input type="hidden" name="projectId" value={projectId} />
+            <Input
+              name="propertyId"
+              inputMode="numeric"
+              pattern="\d+"
+              required
+              placeholder="GA4 Property ID (např. 123456789)"
+            />
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              Připojení přes Google (OAuth) — uděluje se přístup jen pro čtení GA4.
+            </p>
+            <Button type="submit" size="sm">
+              <Plug className="size-4" /> Připojit přes Google
+            </Button>
+          </form>
         ) : (
           <div className="space-y-2">
             <Button type="button" size="sm" disabled>

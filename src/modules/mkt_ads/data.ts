@@ -51,8 +51,8 @@ function dayKey(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** ISO týden (pondělí–neděle) jako „RRRR-Www" — pro týdenní srovnání. */
-function isoWeekLabel(d: Date): string {
+/** ISO týden (pondělí–neděle) jako „RRRR-Www" — pro týdenní srovnání. Sdílené i mkt_analytics. */
+export function isoWeekLabel(d: Date): string {
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   // ISO: čtvrtek téhož týdne určuje rok i číslo týdne.
   const dayNum = (date.getUTCDay() + 6) % 7; // Po=0 … Ne=6
