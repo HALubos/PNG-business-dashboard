@@ -83,8 +83,10 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
     odliší od `<ORDER_ID>`/`<ORDER_ITEMS>` lookaheadem `[\s/>]`), datum `<DATE>`,
     order-level celek `<TOTAL_PRICE><WITH_VAT>`. Položky `<ORDER_ITEMS>`/`<ITEM>` mají
     VLASTNÍ `<TOTAL_PRICE>`/`<UNIT_PRICE>` → před čtením celku se odříznou. Pole se čtou
-    case-insensitive, s fallbacky pro jiné šablony. Agreguje na **denní** `revenue`
-    (suma cen vč. DPH) + `conversions` (počet objednávek) →
+    case-insensitive, s fallbacky pro jiné šablony. **Tržba = cena BEZ DPH
+    (`<WITHOUT_VAT>`) přepočtená na CZK kurzem `<CURRENCY><EXCHANGE_RATE>`; storno/
+    zrušené objednávky (dle `<STATUS>`, `EXCLUDED_STATUS_PATTERNS`) se nepočítají.**
+    Agreguje na **denní** `revenue` (suma) + `conversions` (počet objednávek) →
     `MetricFact` (`source = shoptet_orders`, `overridesRevenue = true`). **Tripwiry**
     (po vzoru `processResellerFeed`): první sync bez `<order>` → chyba; bloky jsou, ale
     0 načteno → chyba „zkontrolujte mapování polí"; inkrement bez novinek → prázdno.

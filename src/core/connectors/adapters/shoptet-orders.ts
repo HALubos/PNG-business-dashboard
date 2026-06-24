@@ -9,8 +9,9 @@ import { streamFeedBlocks } from "@/modules/resellers/feed/feed-stream";
 // (volitelně omezená na IP). Inkrement přes `&updateTimeFrom=YYYY-MM-DD`.
 //
 // Parsuje se PROUDOVĚ (`streamFeedBlocks`, bez DOM, vzor `feed-stream.ts`),
-// agreguje na DENNÍ granularitu → `MetricFact` (`revenue` = suma cen vč. DPH,
-// `conversions` = počet objednávek za den).
+// agreguje na DENNÍ granularitu → `MetricFact` (`revenue` = suma cen BEZ DPH
+// přepočtená na CZK přes kurz, `conversions` = počet objednávek za den).
+// Storno/zrušené objednávky (dle <STATUS>) se NEpočítají.
 //
 // INKREMENT × KOREKTNOST (důležité):
 // `runConnectorSync` ukládá denní metriky přepisem (`update: { value }`). Aby
@@ -58,7 +59,18 @@ function parseDate(v: string | null): Date | null {
 
 interface ParsedOrder {
   date: Date;
-  revenue: number;
+  revenue: number; // bez DPH, přepočteno na CZK
+  status: string | null;
+}
+
+// Stavy považované za storno/zrušení → NEpočítat do tržby (substring, case-insensitive).
+// ⚠️ Uprav podle reálných názvů stavů v tvém Shoptetu (export byl při ladění prázdný).
+const EXCLUDED_STATUS_PATTERNS = ["storno", "zrušen", "zruseno", "cancel"];
+
+function isExcludedStatus(status: string | null): boolean {
+  if (!status) return false;
+  const s = status.toLowerCase();
+  return EXCLUDED_STATUS_PATTERNS.some((p) => s.includes(p));
 }
 
 // Pod-stromy objednávky, které mají VLASTNÍ cenu (`<TOTAL_PRICE>`/`<UNIT_PRICE>` u
@@ -86,26 +98,47 @@ function stripNestedPrices(block: string): string {
 }
 
 /**
- * Celková cena objednávky vč. DPH. Preferuje EXPLICITNÍ celková pole, teprve pak
- * obecný `<price>` (po odříznutí pod-stromů by měl být už jen order-level).
+ * Celková cena objednávky BEZ DPH (v měně objednávky). Preferuje explicitní
+ * `<TOTAL_PRICE><WITHOUT_VAT>` (po odříznutí pod-stromů jen order-level), pak fallbacky.
  */
-function orderTotalWithVat(head: string): number | null {
-  // 1) Shoptet: <TOTAL_PRICE><WITH_VAT>…</WITH_VAT></TOTAL_PRICE> = celek objednávky.
-  //    (`WITH_VAT` se s `WITHOUT_VAT` neplete — `<WITH_VAT` literal v `<WITHOUT_VAT>` není.)
+function orderTotalWithoutVat(head: string): number | null {
+  // Shoptet: <TOTAL_PRICE><WITHOUT_VAT>…</WITHOUT_VAT></TOTAL_PRICE>.
   const total = tag(head, "TOTAL_PRICE");
   if (total) {
-    const v = toNum(tag(total, "WITH_VAT"));
+    const v = toNum(tag(total, "WITHOUT_VAT"));
     if (v !== null) return v;
   }
-  // 2) fallbacky pro jiné šablony: ploché pole, pak obecný <price>.
-  const flat = toNum(tag(head, "priceWithVat") ?? tag(head, "totalWithVat"));
+  // fallbacky pro jiné šablony:
+  const flat = toNum(tag(head, "priceWithoutVat") ?? tag(head, "totalWithoutVat"));
   if (flat !== null) return flat;
   const price = tag(head, "price");
   if (price) {
-    const v = toNum(tag(price, "withVat"));
+    const v = toNum(tag(price, "withoutVat"));
     if (v !== null) return v;
   }
   return null;
+}
+
+/**
+ * Kurz objednávky (`<CURRENCY><EXCHANGE_RATE>`) pro přepočet na CZK. Default 1
+ * (CZK objednávky / chybějící kurz). Šablona má za placeholderem tečku
+ * (`#currencyExchangeRate#.`) → ořízneme koncové tečky.
+ * ⚠️ Předpoklad směru: CZK = částka(v měně) × kurz. U vícemenného obchodu ověř
+ * na jedné reálné cizoměnové objednávce, zda se kurzem násobí (ne dělí).
+ */
+function orderExchangeRate(head: string): number {
+  const cur = tag(head, "CURRENCY");
+  const raw = cur ? tag(cur, "EXCHANGE_RATE") : null;
+  if (!raw) return 1;
+  const n = Number(raw.replace(/\s/g, "").replace(",", ".").replace(/\.+$/, ""));
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+/** Tržba objednávky = cena bez DPH přepočtená na CZK kurzem. */
+function orderRevenue(head: string): number | null {
+  const base = orderTotalWithoutVat(head);
+  if (base === null) return null;
+  return base * orderExchangeRate(head);
 }
 
 /**
@@ -122,10 +155,10 @@ function parseOrder(block: string): ParsedOrder | null {
   );
   if (!date) return null;
 
-  const revenue = orderTotalWithVat(head);
+  const revenue = orderRevenue(head);
   if (revenue === null) return null;
 
-  return { date, revenue };
+  return { date, revenue, status: tag(head, "STATUS") };
 }
 
 /** Připojí `&updateTimeFrom=YYYY-MM-DD` k permanentní URL (která už má `?hash=`). */
@@ -154,7 +187,7 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
     const sinceDay = since ? toDay(since).getTime() : null;
     const url = since ? withUpdateTimeFrom(connector.feedUrl, since) : connector.feedUrl;
 
-    // Agregace na den: revenue (suma cen vč. DPH) + conversions (počet objednávek).
+    // Agregace na den: revenue (suma cen bez DPH v CZK) + conversions (počet objednávek).
     const byDay = new Map<number, { revenue: number; orders: number }>();
     let scanned = 0; // počet <ORDER> bloků ve feedu
     let parsed = 0; // z toho úspěšně načtených (datum + cena)
@@ -163,6 +196,8 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
       const order = parseOrder(block);
       if (!order) continue;
       parsed++;
+      // Storno/zrušené objednávky se nepočítají (parsed je počítá kvůli tripwiru níž).
+      if (isExcludedStatus(order.status)) continue;
       const dayMs = toDay(order.date).getTime();
       // Dny starší než `since` jsou v inkrementu jen částečné → nepřepisuj je.
       if (sinceDay !== null && dayMs < sinceDay) continue;
