@@ -3,6 +3,7 @@ import { modulePermissionKeys, GROUP_ORDER } from "./types";
 import { stockModule } from "./stock/module";
 import { analyticsModule } from "./analytics/module";
 import { resellersModule } from "./resellers/module";
+import { mktAdsModule } from "./mkt_ads/module";
 
 // ─────────────────────────────────────────────────────────────
 // REGISTR MODULŮ
@@ -12,6 +13,7 @@ const MODULES: ModuleDefinition[] = [
   stockModule,
   analyticsModule,
   resellersModule,
+  mktAdsModule,
 ];
 
 /** Všechny zaregistrované moduly, seřazené dle pořadí. */

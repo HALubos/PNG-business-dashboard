@@ -28,6 +28,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "resellers.viewall",
     "resellers.edit",
     "resellers.admin",
+    "mkt_ads.view",
+    "mkt_ads.viewall",
+    "mkt_ads.export",
   ],
   // Zástupce: vidí svůj modul a své odběratele, může exportovat.
   Zástupce: [

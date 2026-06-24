@@ -57,9 +57,10 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
     Scope `src/core/projects/project-scope.ts` (vzor `reseller-scope.ts`).
   - **Konektor vrstva** `src/core/connectors/`: modely `Connector` + enumy
     `ConnectorKind`/`ConnectorType`/`SyncStatus`, abstrakce `ConnectorAdapter`
-    (vč. katalogových metadat) a registr adaptérů (`registry.ts`). Adaptéry
-    (`shoptet_orders`, `ga4`, `google_ads`, `meta_ads`, `sklik`) jsou zatím
-    **placeholdery** (`sync()` vrací prázdno; OAuth = „brzy", disabled).
+    (vč. katalogových metadat) a registr adaptérů (`registry.ts`). Adaptér
+    **`shoptet_orders` je reálný** (viz „Dávka 2" níže); `ga4`, `google_ads`,
+    `meta_ads`, `sklik` jsou zatím **placeholdery** (`sync()` vrací prázdno;
+    OAuth = „brzy", disabled).
   - **Kanonika metrik** `metrics.ts` (`CANONICAL_METRICS`: cost/revenue/impressions/
     clicks/conversions/sessions/users) + model `MetricFact`. **Odvozená KPI**
     (ROAS/PNO/konverzní poměr) v `kpi.ts` — JEDINÉ místo (anti-drift), vč.
@@ -67,14 +68,37 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
   - **Scheduler** `scheduler.ts` (in-process, interval `MARKETING_SYNC_INTERVAL_MIN`,
     start přes `src/instrumentation.ts`) + `runConnectorSync` (`sync.ts`) podle
     `runResellerFeedJob` (detached, `syncStatus`, `cursor`, upsert `MetricFact`,
-    backfill `MARKETING_BACKFILL_FROM`). Zatím **dry-run**.
+    backfill `MARKETING_BACKFILL_FROM`). Reálně plní data `shoptet_orders`;
+    OAuth adaptéry zatím dry-run.
   - **RBAC + secrets:** práva `admin.connectors` / `admin.projects` v
     `CORE_PERMISSIONS`; tokeny šifrované at-rest (`crypto.ts`, `CONNECTOR_ENC_KEY`).
   - **Stránka Integrace** (`/integrace`, právo `admin.connectors`): katalog karet
     z registru adaptérů, přepínač projektu, stav připojení (polling),
     připojit/odpojit/aktualizovat, hláška o backfillu, štítek „přebíjí GA4".
-- **Marketing — Fáze B/C — NEDĚLAT bez zadání:** reálné `sync()` adaptérů
-  (Shoptet, GA4, Google/Meta Ads, Sklik), OAuth flow, moduly `mkt_ads`/`mkt_analytics`.
+- **Marketingová větev — Dávka 2 (Shoptet tržby + modul Reklamní výkon) HOTOVO.**
+  - **Adaptér `shoptet_orders` (reálný `sync()`)** — `src/core/connectors/adapters/
+    shoptet-orders.ts`. Proudově stáhne export objednávek z `connector.feedUrl`
+    (vzor `feed-stream.ts`, tag `<order>`), z každé objednávky vezme datum a celkovou
+    cenu vč. DPH (po odříznutí `<orderItems>`, ať nekolidují ceny položek), agreguje
+    na **denní** `revenue` (suma) + `conversions` (počet objednávek) → `MetricFact`
+    (`source = shoptet_orders`, `overridesRevenue = true`). Inkrement i 15min limit
+    Shoptetu řeší **vždy** přes `&updateTimeFrom=YYYY-MM-DD` (z `connector.cursor`,
+    první běh = backfill `MARKETING_BACKFILL_FROM`). **Korektnost přepisu:** emituje
+    metriky jen pro dny `>= since` (objednávka dne D má `updateTime >= D`, takže okno
+    `updateTimeFrom=D` pokrývá tyto dny úplně → přepis `MetricFact` je správný; starší
+    dny jsou v inkrementu jen částečné a zahazují se). Pozn.: pozdější změna **ceny**
+    objednávky starší než cursor se nepromítne (potřebovala by per-objednávkovou
+    tabulku — mimo MVP). Polní názvy Shoptetu jsou tolerantní (v repu není vzorek).
+  - **Modul `mkt_ads` „Reklamní výkon"** (group `marketing`, klíč `mkt_ads`,
+    `/reklamni-vykon`). KPI hlavička **z `kpi.ts`** (tržby, náklady, PNO, ROAS,
+    konverzní poměr, konverze, počet platforem, návštěvy) + grafy (náklady vs. tržby
+    denně, náklady dle platformy, týdenní srovnání — lehké CSS sloupce, bez knihovny).
+    Filtr **projekt (značka) + období**, export XLSX/CSV (právo `mkt_ads.export`).
+    Čte **výhradně** přes `MetricFact`/`kpi.ts` (datová vrstva `src/modules/mkt_ads/
+    data.ts`, období `period.ts`), scope přes `project-scope.ts`. Náklady jsou zatím
+    0 (reklamní konektory = dávka 3+). Manažer má práva modulu, Admin vše.
+- **Marketing — další dávky (NEDĚLAT bez zadání):** reálné `sync()` OAuth adaptérů
+  (GA4, Google/Meta Ads, Sklik), OAuth flow, modul `mkt_analytics` (Web analytika).
 - **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka jako úplně nové listingy, automatické
   (cron) stahování feedů **v obchodní větvi**, produkční hosting. Nové moduly se
   přidávají na zadání.
@@ -205,8 +229,8 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  ├─ app/
 │  │  ├─ (auth)/login/        # přihlášení + server action
 │  │  ├─ (dashboard)/         # layout s navigací dle práv
-│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/ · odberatele/ · integrace/
-│  │  └─ api/{auth,stock/export,analytics/export}/
+│  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/ · odberatele/ · integrace/ · reklamni-vykon/
+│  │  └─ api/{auth,stock/export,analytics/export,mkt-ads/export}/
 │  ├─ instrumentation.ts      # start in-process scheduleru konektorů (Node runtime)
 │  ├─ core/
 │  │  ├─ auth/                # auth.config.ts, auth.ts, session.ts, password.ts
@@ -217,6 +241,7 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  ├─ modules/stock/          # constants, opportunities, rules, reseller-scope, import/, feed/, components/
 │  ├─ modules/analytics/      # aggregate (žebříčky + trend), components/
 │  ├─ modules/resellers/      # feed/ (formats registr + feed-stream + service, proudově), components/
+│  ├─ modules/mkt_ads/        # data (MetricFact→KPI), period, components/ (toolbar + grafy)
 │  ├─ components/{ui,dashboard,integrace}/
 │  ├─ lib/{prisma,utils}.ts
 │  └─ generated/prisma/       # generovaný Prisma klient (mimo git)
