@@ -1,11 +1,18 @@
+/** Escapuje regex-metaznaky v názvu tagu (např. `g:gtin`). */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * Proudově stáhne feed a yielduje kompletní bloky `<itemTag>…</itemTag>`, aniž by
+ * Proudově stáhne feed a yielduje kompletní bloky `<itemTag …>…</itemTag>`, aniž by
  * držel celý soubor nebo stavěl DOM. V paměti je vždy jen jeden rozpracovaný blok.
  * Vhodné pro velké feedy (80+ MB).
  *
- * Pozn.: otevírací tag se hledá přesně jako `<itemTag>` (bez atributů) — pokrývá
- * Google `<item>`, Heureka `<SHOPITEM>`, Interní `<entry>`. (Atributy na položce =
- * TODO.)
+ * Otevírací tag se hledá jako `<itemTag` následované `>`, mezerou nebo `/` — pokrývá
+ * `<item>` i `<order code="…">` (atributy), ale NE delší názvy jako `<orderItems>`
+ * (lookahead `[\s/>]` to odliší). Pro tagy bez atributů jsou pozice shodné s dřívějším
+ * `indexOf("<tag>")`, takže Google `<item>` / Heureka `<SHOPITEM>` / Interní `<entry>`
+ * se chovají beze změny.
  */
 export async function* streamFeedBlocks(
   url: string,
@@ -15,7 +22,8 @@ export async function* streamFeedBlocks(
   if (!res.ok) throw new Error(`Feed vrátil HTTP ${res.status}.`);
   if (!res.body) throw new Error("Feed nevrátil tělo odpovědi.");
 
-  const open = `<${itemTag}>`;
+  const openRe = new RegExp(`<${escapeRe(itemTag)}(?=[\\s/>])`);
+  const openHint = `<${itemTag}`; // pro retenci na hranici chunku
   const close = `</${itemTag}>`;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -26,13 +34,14 @@ export async function* streamFeedBlocks(
     if (value) buf += decoder.decode(value, { stream: true });
 
     for (;;) {
-      const o = buf.indexOf(open);
-      if (o === -1) {
+      const m = openRe.exec(buf);
+      if (!m) {
         // Žádný otevírací tag (hlavička / mezera) — necháme jen konec kvůli
         // možnému rozseknutí tagu mezi chunky.
-        if (buf.length > open.length) buf = buf.slice(-open.length);
+        if (buf.length > openHint.length) buf = buf.slice(-openHint.length);
         break;
       }
+      const o = m.index;
       const c = buf.indexOf(close, o);
       if (c === -1) {
         // Neúplný blok — zahodíme vše před položkou a počkáme na další data.

@@ -59,26 +59,70 @@ interface ParsedOrder {
   revenue: number;
 }
 
+// Pod-stromy objednávky, které mají vlastní `<price>`/`<withVat>` (položky, doprava,
+// platba, slevy). Odřízneme je, aby zbylé order-level `<price>` nešlo zaměnit s cenou
+// dopravy/platby — jinak by `tag(head,"price")` mohlo vzít první (= NE order total).
+// Názvy dle exportu objednávek Shoptetu, tolerantně (v repu není vzorový soubor).
+const NESTED_PRICE_CONTAINERS = [
+  "orderItems",
+  "shippingDetails",
+  "billingDetails",
+  "shipping",
+  "billing",
+  "payment",
+  "paymentMethod",
+  "shippingMethod",
+  "discountCoupon",
+  "discount",
+];
+
+/** Odřízne vnořené pod-stromy nesoucí vlastní cenu (viz výše). */
+function stripNestedPrices(block: string): string {
+  let s = block;
+  for (const c of NESTED_PRICE_CONTAINERS) {
+    s = s.replace(new RegExp(`<${c}\\b[^>]*>[\\s\\S]*?</${c}>`, "gi"), "");
+  }
+  return s;
+}
+
+/**
+ * Celková cena objednávky vč. DPH. Preferuje EXPLICITNÍ celková pole, teprve pak
+ * obecný `<price>` (po odříznutí pod-stromů by měl být už jen order-level).
+ */
+function orderTotalWithVat(head: string): number | null {
+  // 1) ploché celkové pole
+  const flat = toNum(tag(head, "priceWithVat") ?? tag(head, "totalWithVat"));
+  if (flat !== null) return flat;
+  // 2) explicitní kontejner totalu
+  const total = tag(head, "totalPrice");
+  if (total) {
+    const v = toNum(tag(total, "withVat"));
+    if (v !== null) return v;
+  }
+  // 3) obecný order-level <price>
+  const price = tag(head, "price");
+  if (price) {
+    const v = toNum(tag(price, "withVat"));
+    if (v !== null) return v;
+  }
+  return null;
+}
+
 /**
  * Z jednoho `<order>` bloku vytáhne datum objednávky a celkovou cenu vč. DPH.
- * Nejdřív odřízne `<orderItems>` (ceny položek by jinak kolidovaly s order-level
- * totalem). Názvy polí odpovídají exportu objednávek Shoptetu; bereme i běžné
- * alternativy (v repu není vzorový soubor, takže držíme tolerantní pořadí).
+ * Nejdřív odřízne pod-stromy s vlastní cenou (položky/doprava/platba/slevy), pak
+ * čte order-level total. Názvy polí odpovídají exportu objednávek Shoptetu;
+ * bereme i běžné alternativy (v repu není vzorový soubor → tolerantní pořadí).
  */
 function parseOrder(block: string): ParsedOrder | null {
-  // Odřízni vnořené položky objednávky (jejich ceny/EANy nepatří do order totalu).
-  const head = block.replace(/<orderItems>[\s\S]*?<\/orderItems>/i, "");
+  const head = stripNestedPrices(block);
 
   const date = parseDate(
     tag(head, "creationTime") ?? tag(head, "date") ?? tag(head, "changeTime"),
   );
   if (!date) return null;
 
-  // Order total vč. DPH: kontejner <price>/<totalPrice> → <withVat>, fallback <priceWithVat>.
-  const priceBlock = tag(head, "price") ?? tag(head, "totalPrice");
-  const revenue =
-    (priceBlock ? toNum(tag(priceBlock, "withVat")) : null) ??
-    toNum(tag(head, "priceWithVat"));
+  const revenue = orderTotalWithVat(head);
   if (revenue === null) return null;
 
   return { date, revenue };
@@ -106,14 +150,19 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
     }
     // `since` je vždy Date (cursor nebo backfill). Inkrement i 15min limit Shoptetu
     // řešíme tím, že VŽDY stahujeme přes `updateTimeFrom`.
+    const isFirstSync = !connector.cursor;
     const sinceDay = since ? toDay(since).getTime() : null;
     const url = since ? withUpdateTimeFrom(connector.feedUrl, since) : connector.feedUrl;
 
     // Agregace na den: revenue (suma cen vč. DPH) + conversions (počet objednávek).
     const byDay = new Map<number, { revenue: number; orders: number }>();
+    let scanned = 0; // počet <order> bloků ve feedu
+    let parsed = 0; // z toho úspěšně načtených (datum + cena)
     for await (const block of streamFeedBlocks(url, ORDER_TAG)) {
+      scanned++;
       const order = parseOrder(block);
       if (!order) continue;
+      parsed++;
       const dayMs = toDay(order.date).getTime();
       // Dny starší než `since` jsou v inkrementu jen částečné → nepřepisuj je.
       if (sinceDay !== null && dayMs < sinceDay) continue;
@@ -121,6 +170,23 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
       agg.revenue += order.revenue;
       agg.orders += 1;
       byDay.set(dayMs, agg);
+    }
+
+    // Tripwiry proti TICHÉMU „ok" nad rozbitým feedem (vzor `processResellerFeed`,
+    // které hází na scanned===0). Inkrement smí legitimně vrátit 0 objednávek (nic se
+    // nezměnilo od cursoru), proto rozlišujeme první sync od inkrementu:
+    if (scanned === 0) {
+      if (isFirstSync) {
+        throw new Error(
+          "Feed nevrátil žádné objednávky (element <order>) — zkontrolujte formát exportu a URL.",
+        );
+      }
+      return []; // inkrement: nic nového od posledního cursoru
+    }
+    if (parsed === 0) {
+      throw new Error(
+        `Feed vrátil ${scanned} objednávek, ale žádnou se nepodařilo načíst — zkontrolujte mapování polí (datum, cena vč. DPH).`,
+      );
     }
 
     const out: CanonicalMetric[] = [];

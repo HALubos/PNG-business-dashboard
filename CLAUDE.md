@@ -78,10 +78,15 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
 - **Marketingová větev — Dávka 2 (Shoptet tržby + modul Reklamní výkon) HOTOVO.**
   - **Adaptér `shoptet_orders` (reálný `sync()`)** — `src/core/connectors/adapters/
     shoptet-orders.ts`. Proudově stáhne export objednávek z `connector.feedUrl`
-    (vzor `feed-stream.ts`, tag `<order>`), z každé objednávky vezme datum a celkovou
-    cenu vč. DPH (po odříznutí `<orderItems>`, ať nekolidují ceny položek), agreguje
-    na **denní** `revenue` (suma) + `conversions` (počet objednávek) → `MetricFact`
-    (`source = shoptet_orders`, `overridesRevenue = true`). Inkrement i 15min limit
+    (vzor `feed-stream.ts`, tag `<order>` — `streamFeedBlocks` snáší i atributy
+    `<order code="…">`), z každé objednávky vezme datum a **order-level** cenu vč. DPH
+    (nejdřív odřízne pod-stromy s vlastní cenou — položky/doprava/platba/slevy —, pak
+    preferuje explicitní pole `priceWithVat`/`totalPrice` před obecným `<price>`),
+    agreguje na **denní** `revenue` (suma) + `conversions` (počet objednávek) →
+    `MetricFact` (`source = shoptet_orders`, `overridesRevenue = true`). **Tripwiry**
+    (po vzoru `processResellerFeed`): první sync bez `<order>` → chyba; bloky jsou, ale
+    0 načteno → chyba „zkontrolujte mapování polí"; inkrement bez novinek → prázdno.
+    Inkrement i 15min limit
     Shoptetu řeší **vždy** přes `&updateTimeFrom=YYYY-MM-DD` (z `connector.cursor`,
     první běh = backfill `MARKETING_BACKFILL_FROM`). **Korektnost přepisu:** emituje
     metriky jen pro dny `>= since` (objednávka dne D má `updateTime >= D`, takže okno
