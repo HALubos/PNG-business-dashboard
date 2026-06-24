@@ -13,7 +13,13 @@ import { getConnectorAdapter } from "./registry";
 // PRAVIDLO PRIORITY TRŽEB (drženo JEN tady): je-li mezi zdroji e-shop konektor
 // s `overridesRevenue` (Shoptet apod.), bere se jeho `revenue` a PŘEBÍJÍ GA4;
 // jinak fallback na GA4 revenue.
+//
+// REŽIM DPH: kanonický `revenue` je BEZ DPH. Přepínač „s DPH" přičte `revenue_vat`
+// (DPH část, kterou emitují e-shop zdroje). Drženo JEN tady — moduly jen předají režim.
 // ─────────────────────────────────────────────────────────────
+
+/** Režim zobrazení tržeb: bez DPH (kanonický základ) nebo s DPH (+ `revenue_vat`). */
+export type VatMode = "with" | "without";
 
 /** Jeden řádek kanonické metriky (výřez `MetricFact` za zvolené období/projekt). */
 export interface MetricRow {
@@ -46,35 +52,45 @@ function sumMetric(rows: MetricRow[], metric: CanonicalMetricKey): number {
  * Autoritativní tržby: priorita e-shop zdrojů (`overridesRevenue`) → GA4 fallback.
  * Vrací i informaci, odkud se tržby vzaly.
  */
-export function resolveRevenue(rows: MetricRow[]): {
+export function resolveRevenue(
+  rows: MetricRow[],
+  vatMode: VatMode = "without",
+): {
   revenue: number;
   source: "eshop" | "ga4" | "zadny";
 } {
   let eshop = 0;
+  let eshopVat = 0;
   let hasEshop = false;
   let ga4 = 0;
+  let ga4Vat = 0;
   let hasGa4 = false;
 
   for (const r of rows) {
-    if (r.metric !== "revenue") continue;
+    if (r.metric !== "revenue" && r.metric !== "revenue_vat") continue;
     const adapter = getConnectorAdapter(r.source);
     if (adapter?.overridesRevenue) {
-      eshop += r.value;
-      hasEshop = true;
+      if (r.metric === "revenue") {
+        eshop += r.value;
+        hasEshop = true;
+      } else eshopVat += r.value;
     } else if (r.source === "ga4") {
-      ga4 += r.value;
-      hasGa4 = true;
+      if (r.metric === "revenue") {
+        ga4 += r.value;
+        hasGa4 = true;
+      } else ga4Vat += r.value;
     }
   }
 
-  if (hasEshop) return { revenue: eshop, source: "eshop" };
-  if (hasGa4) return { revenue: ga4, source: "ga4" };
+  const vat = vatMode === "with";
+  if (hasEshop) return { revenue: eshop + (vat ? eshopVat : 0), source: "eshop" };
+  if (hasGa4) return { revenue: ga4 + (vat ? ga4Vat : 0), source: "ga4" };
   return { revenue: 0, source: "zadny" };
 }
 
 /** Spočítá KPI z kanonických řádků (jednoho projektu za období). */
-export function computeKpi(rows: MetricRow[]): Kpi {
-  const { revenue, source } = resolveRevenue(rows);
+export function computeKpi(rows: MetricRow[], vatMode: VatMode = "without"): Kpi {
+  const { revenue, source } = resolveRevenue(rows, vatMode);
   // Náklady = jen reklamní platformy (jediné, které emitují `cost`).
   const naklady = sumMetric(rows, "cost");
   const konverze = sumMetric(rows, "conversions");

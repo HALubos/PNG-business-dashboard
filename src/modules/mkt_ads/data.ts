@@ -1,6 +1,12 @@
 import type { ConnectorType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { computeKpi, resolveRevenue, type Kpi, type MetricRow } from "@/core/connectors/kpi";
+import {
+  computeKpi,
+  resolveRevenue,
+  type Kpi,
+  type MetricRow,
+  type VatMode,
+} from "@/core/connectors/kpi";
 
 // ─────────────────────────────────────────────────────────────
 // Datová vrstva modulu „Reklamní výkon". Čte VÝHRADNĚ z `MetricFact` a počítá
@@ -86,6 +92,7 @@ export async function loadAdsData(
   projectId: string,
   from: Date | null,
   to: Date | null,
+  vatMode: VatMode = "without",
 ): Promise<AdsData> {
   const dateWhere: { gte?: Date; lte?: Date } = {};
   if (from) dateWhere.gte = from;
@@ -106,7 +113,7 @@ export async function loadAdsData(
     metric: f.metric,
     value: f.value,
   }));
-  const kpi = computeKpi(rows);
+  const kpi = computeKpi(rows, vatMode);
 
   // Denní řada: revenue přes pravidlo priority (resolveRevenue per den), cost + conversions sumou.
   const perDay = new Map<string, MetricRow[]>();
@@ -120,7 +127,7 @@ export async function loadAdsData(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, dayRows]) => ({
       date,
-      revenue: resolveRevenue(dayRows).revenue,
+      revenue: resolveRevenue(dayRows, vatMode).revenue,
       cost: dayRows.filter((r) => r.metric === "cost").reduce((s, r) => s + r.value, 0),
       conversions: dayRows
         .filter((r) => r.metric === "conversions")

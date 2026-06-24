@@ -17,9 +17,9 @@ import { resolvePeriod, DEFAULT_PERIOD } from "@/modules/mkt_ads/period";
 
 type Col = { header: string; key: string; width: number };
 
-const DAILY_COLS: Col[] = [
+const dailyCols = (dphLabel: string): Col[] => [
   { header: "Datum", key: "date", width: 14 },
-  { header: "Tržby (Kč)", key: "revenue", width: 16 },
+  { header: `Tržby (${dphLabel}, Kč)`, key: "revenue", width: 20 },
   { header: "Náklady (Kč)", key: "cost", width: 16 },
   { header: "Konverze", key: "conversions", width: 12 },
 ];
@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
   const klic = req.nextUrl.searchParams.get("projekt") ?? "";
   const obdobi = req.nextUrl.searchParams.get("obdobi") ?? DEFAULT_PERIOD;
   const format = (req.nextUrl.searchParams.get("format") ?? "xlsx").toLowerCase();
+  const vatMode = req.nextUrl.searchParams.get("dph") === "s" ? "with" : "without";
 
   const project = await prisma.project.findUnique({
     where: { klic },
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
 
   const bounds = await getProjectDateBounds(project.id);
   const period = resolvePeriod(obdobi, bounds);
-  const data = await loadAdsData(project.id, period.from, period.to);
+  const data = await loadAdsData(project.id, period.from, period.to, vatMode);
 
   const rows = data.daily.map((d) => ({
     date: d.date,
@@ -59,22 +60,26 @@ export async function GET(req: NextRequest) {
     conversions: d.conversions,
   }));
 
-  const baseName = `reklamni-vykon_${project.klic}_${period.key}`;
+  const dphLabel = vatMode === "with" ? "s DPH" : "bez DPH";
+  const cols = dailyCols(dphLabel);
+  const baseName = `reklamni-vykon_${project.klic}_${period.key}_${
+    vatMode === "with" ? "sDPH" : "bezDPH"
+  }`;
 
   await prisma.auditLog.create({
     data: {
       userId: user.id,
       akce: "export",
       entita: `MktAds:${project.klic}`,
-      detail: { format, obdobi: period.key, dny: rows.length },
+      detail: { format, obdobi: period.key, dph: vatMode, dny: rows.length },
     },
   });
 
   if (format === "csv") {
     const sep = ";";
-    const head = DAILY_COLS.map((c) => c.header).join(sep);
+    const head = cols.map((c) => c.header).join(sep);
     const lines = rows.map((r) =>
-      DAILY_COLS.map((c) => {
+      cols.map((c) => {
         const v = String(r[c.key as keyof typeof r] ?? "");
         return /[";\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
       }).join(sep),
@@ -92,7 +97,7 @@ export async function GET(req: NextRequest) {
 
   // List 1 — denní řada.
   const ws = wb.addWorksheet("Denně");
-  ws.columns = DAILY_COLS;
+  ws.columns = cols;
   ws.getRow(1).font = { bold: true };
   for (const r of rows) ws.addRow(r);
 
@@ -107,7 +112,8 @@ export async function GET(req: NextRequest) {
   sum.addRows([
     { k: "Projekt", v: project.nazev },
     { k: "Období", v: period.label },
-    { k: "Tržby (Kč)", v: Math.round(k.trzby) },
+    { k: "Režim tržeb", v: dphLabel },
+    { k: `Tržby (${dphLabel}, Kč)`, v: Math.round(k.trzby) },
     { k: "Náklady (Kč)", v: Math.round(k.naklady) },
     { k: "ROAS", v: k.roas ?? "—" },
     { k: "PNO", v: k.pno ?? "—" },

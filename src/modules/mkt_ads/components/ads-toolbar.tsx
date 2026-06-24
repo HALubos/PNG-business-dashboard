@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import type { VatMode } from "@/core/connectors/kpi";
 import { PERIODS, type PeriodKey } from "../period";
 
 interface ProjectRef {
@@ -13,10 +14,13 @@ interface ProjectRef {
   nazev: string;
 }
 
-function buildHref(projekt: string, obdobi: string): string {
+const dphParam = (v: VatMode) => (v === "with" ? "s" : "bez");
+
+function buildHref(projekt: string, obdobi: string, vatMode: VatMode): string {
   const p = new URLSearchParams();
   p.set("projekt", projekt);
   p.set("obdobi", obdobi);
+  p.set("dph", dphParam(vatMode));
   return `/reklamni-vykon?${p.toString()}`;
 }
 
@@ -24,12 +28,14 @@ export function AdsToolbar({
   projects,
   selectedKlic,
   period,
+  vatMode,
   canExport,
   exportQuery,
 }: {
   projects: ProjectRef[];
   selectedKlic: string;
   period: PeriodKey;
+  vatMode: VatMode;
   canExport: boolean;
   exportQuery: string;
 }) {
@@ -47,12 +53,29 @@ export function AdsToolbar({
             variant={p.klic === selectedKlic ? "default" : "outline"}
             size="sm"
           >
-            <Link href={buildHref(p.klic, period)}>{p.nazev}</Link>
+            <Link href={buildHref(p.klic, period, vatMode)}>{p.nazev}</Link>
           </Button>
         ))}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        {/* DPH přepínač */}
+        <div className="flex items-center overflow-hidden rounded-md border border-[var(--input)]">
+          {(["without", "with"] as const).map((m) => (
+            <Button
+              key={m}
+              asChild
+              variant={vatMode === m ? "default" : "ghost"}
+              size="sm"
+              className="rounded-none"
+            >
+              <Link href={buildHref(selectedKlic, period, m)}>
+                {m === "without" ? "Bez DPH" : "S DPH"}
+              </Link>
+            </Button>
+          ))}
+        </div>
+
         {/* Období */}
         <label className="text-sm text-[var(--muted-foreground)]" htmlFor="obdobi">
           Období:
@@ -60,7 +83,7 @@ export function AdsToolbar({
         <select
           id="obdobi"
           value={period}
-          onChange={(e) => router.push(buildHref(selectedKlic, e.target.value))}
+          onChange={(e) => router.push(buildHref(selectedKlic, e.target.value, vatMode))}
           className="h-9 rounded-md border border-[var(--input)] bg-[var(--background)] px-3 text-sm"
         >
           {PERIODS.map((p) => (

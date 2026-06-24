@@ -60,6 +60,7 @@ function parseDate(v: string | null): Date | null {
 interface ParsedOrder {
   date: Date;
   revenue: number; // bez DPH, přepočteno na CZK
+  vat: number; // DPH část, přepočtená na CZK (pro přepínač „s DPH")
   status: string | null;
 }
 
@@ -134,11 +135,11 @@ function orderExchangeRate(head: string): number {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
-/** Tržba objednávky = cena bez DPH přepočtená na CZK kurzem. */
-function orderRevenue(head: string): number | null {
-  const base = orderTotalWithoutVat(head);
-  if (base === null) return null;
-  return base * orderExchangeRate(head);
+/** DPH část objednávky (`<TOTAL_PRICE><VAT>`) v měně objednávky; 0 když chybí. */
+function orderVatAmount(head: string): number {
+  const total = tag(head, "TOTAL_PRICE");
+  const v = total ? toNum(tag(total, "VAT")) : null;
+  return v ?? 0;
 }
 
 /**
@@ -155,10 +156,16 @@ function parseOrder(block: string): ParsedOrder | null {
   );
   if (!date) return null;
 
-  const revenue = orderRevenue(head);
-  if (revenue === null) return null;
+  const base = orderTotalWithoutVat(head);
+  if (base === null) return null;
+  const rate = orderExchangeRate(head);
 
-  return { date, revenue, status: tag(head, "STATUS") };
+  return {
+    date,
+    revenue: base * rate,
+    vat: orderVatAmount(head) * rate,
+    status: tag(head, "STATUS"),
+  };
 }
 
 /** Připojí `&updateTimeFrom=YYYY-MM-DD` k permanentní URL (která už má `?hash=`). */
@@ -187,8 +194,8 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
     const sinceDay = since ? toDay(since).getTime() : null;
     const url = since ? withUpdateTimeFrom(connector.feedUrl, since) : connector.feedUrl;
 
-    // Agregace na den: revenue (suma cen bez DPH v CZK) + conversions (počet objednávek).
-    const byDay = new Map<number, { revenue: number; orders: number }>();
+    // Agregace na den: revenue (bez DPH v CZK) + vat (DPH v CZK) + conversions.
+    const byDay = new Map<number, { revenue: number; vat: number; orders: number }>();
     let scanned = 0; // počet <ORDER> bloků ve feedu
     let parsed = 0; // z toho úspěšně načtených (datum + cena)
     for await (const block of streamFeedBlocks(url, ORDER_TAG)) {
@@ -201,8 +208,9 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
       const dayMs = toDay(order.date).getTime();
       // Dny starší než `since` jsou v inkrementu jen částečné → nepřepisuj je.
       if (sinceDay !== null && dayMs < sinceDay) continue;
-      const agg = byDay.get(dayMs) ?? { revenue: 0, orders: 0 };
+      const agg = byDay.get(dayMs) ?? { revenue: 0, vat: 0, orders: 0 };
       agg.revenue += order.revenue;
+      agg.vat += order.vat;
       agg.orders += 1;
       byDay.set(dayMs, agg);
     }
@@ -228,6 +236,7 @@ export const shoptetOrdersAdapter: ConnectorAdapter = {
     for (const [dayMs, agg] of byDay) {
       const date = new Date(dayMs);
       out.push({ source: "shoptet_orders", date, metric: "revenue", value: agg.revenue });
+      out.push({ source: "shoptet_orders", date, metric: "revenue_vat", value: agg.vat });
       out.push({ source: "shoptet_orders", date, metric: "conversions", value: agg.orders });
     }
     return out;

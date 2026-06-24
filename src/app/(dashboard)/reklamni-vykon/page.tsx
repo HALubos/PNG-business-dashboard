@@ -12,6 +12,7 @@ import {
 
 import { requirePermission } from "@/core/auth/session";
 import { can } from "@/core/rbac/access";
+import type { VatMode } from "@/core/connectors/kpi";
 import { getVisibleProjects } from "@/core/projects/project-scope";
 import {
   loadAdsData,
@@ -71,10 +72,11 @@ function Kpi({
 export default async function ReklamniVykonPage({
   searchParams,
 }: {
-  searchParams: Promise<{ projekt?: string; obdobi?: string }>;
+  searchParams: Promise<{ projekt?: string; obdobi?: string; dph?: string }>;
 }) {
   const user = await requirePermission("mkt_ads.view");
-  const { projekt, obdobi = DEFAULT_PERIOD } = await searchParams;
+  const { projekt, obdobi = DEFAULT_PERIOD, dph } = await searchParams;
+  const vatMode: VatMode = dph === "s" ? "with" : "without";
 
   const projects = await getVisibleProjects(user, MKT_ADS_VIEWALL);
   const selected =
@@ -107,13 +109,13 @@ export default async function ReklamniVykonPage({
 
   const bounds = await getProjectDateBounds(selected.id);
   const period = resolvePeriod(obdobi, bounds);
-  const data = await loadAdsData(selected.id, period.from, period.to);
+  const data = await loadAdsData(selected.id, period.from, period.to, vatMode);
   const { kpi } = data;
   const canExport = can(user, "mkt_ads.export");
 
   const exportQuery = `&projekt=${encodeURIComponent(
     selected.klic,
-  )}&obdobi=${encodeURIComponent(period.key)}`;
+  )}&obdobi=${encodeURIComponent(period.key)}&dph=${vatMode === "with" ? "s" : "bez"}`;
 
   const rangeText =
     period.from && period.to
@@ -128,13 +130,18 @@ export default async function ReklamniVykonPage({
         projects={projects}
         selectedKlic={selected.klic}
         period={period.key}
+        vatMode={vatMode}
         canExport={canExport}
         exportQuery={exportQuery}
       />
 
       {/* KPI hlavička */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi icon={Coins} label="tržby" value={czk.format(kpi.trzby)} />
+        <Kpi
+          icon={Coins}
+          label={`tržby (${vatMode === "with" ? "s DPH" : "bez DPH"})`}
+          value={czk.format(kpi.trzby)}
+        />
         <Kpi icon={Banknote} label="náklady" value={czk.format(kpi.naklady)} />
         <Kpi icon={TrendingUp} label="ROAS" value={fmtRoas(kpi.roas)} />
         <Kpi icon={Percent} label="PNO" value={fmtPct(kpi.pno)} />

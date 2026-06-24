@@ -98,11 +98,15 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
     dny jsou v inkrementu jen částečné a zahazují se). Pozn.: pozdější změna **ceny**
     objednávky starší než cursor se nepromítne (potřebovala by per-objednávkovou
     tabulku — mimo MVP). Polní názvy Shoptetu jsou tolerantní (v repu není vzorek).
+  - **Přepínač DPH:** kanonický `revenue` je BEZ DPH; e-shop zdroje emitují i
+    `revenue_vat` (DPH část). Režim řeší **jen `kpi.ts`** (`VatMode` v `computeKpi`/
+    `resolveRevenue`: „with" přičte `revenue_vat`). UI volí přes `?dph=s|bez` (default
+    `bez`), promítne se do KPI, grafů i exportu. (Pravidlo priority tržeb beze změny.)
   - **Modul `mkt_ads` „Reklamní výkon"** (group `marketing`, klíč `mkt_ads`,
     `/reklamni-vykon`). KPI hlavička **z `kpi.ts`** (tržby, náklady, PNO, ROAS,
-    konverzní poměr, konverze, počet platforem, návštěvy) + grafy (náklady vs. tržby
-    denně, náklady dle platformy, týdenní srovnání — lehké CSS sloupce, bez knihovny).
-    Filtr **projekt (značka) + období**, export XLSX/CSV (právo `mkt_ads.export`).
+    konverzní poměr, konverze, počet platforem) + grafy (náklady vs. tržby denně,
+    náklady dle platformy, týdenní srovnání — lehké CSS sloupce, bez knihovny). Filtr
+    **projekt (značka) + období + přepínač DPH**, export XLSX/CSV (právo `mkt_ads.export`).
     Čte **výhradně** přes `MetricFact`/`kpi.ts` (datová vrstva `src/modules/mkt_ads/
     data.ts`, období `period.ts`), scope přes `project-scope.ts`. Náklady jsou zatím
     0 (reklamní konektory = dávka 3+). Manažer má práva modulu, Admin vše.
