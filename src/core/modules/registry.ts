@@ -1,5 +1,5 @@
-import type { ModuleDefinition } from "./types";
-import { modulePermissionKeys } from "./types";
+import type { ModuleDefinition, ModuleGroup } from "./types";
+import { modulePermissionKeys, GROUP_ORDER } from "./types";
 import { stockModule } from "./stock/module";
 import { analyticsModule } from "./analytics/module";
 import { resellersModule } from "./resellers/module";
@@ -38,4 +38,21 @@ export function modulesForPermissions(
 /** Všechny klíče oprávnění deklarované všemi moduly (pro seed/administraci). */
 export function allModulePermissionKeys(): string[] {
   return MODULES.flatMap(modulePermissionKeys);
+}
+
+/**
+ * Moduly, na které má uživatel právo, rozdělené do skupin (Obchod / Marketing)
+ * a seřazené dle pořadí. Modul bez `group` spadne pod „obchod". Pohání sekce
+ * v navigaci. Skupiny zachovají pořadí z GROUP_ORDER; prázdné skupiny zůstanou.
+ */
+export function modulesByGroup(
+  permissions: ReadonlySet<string> | ReadonlyArray<string>,
+): Map<ModuleGroup, ModuleDefinition[]> {
+  const result = new Map<ModuleGroup, ModuleDefinition[]>();
+  for (const g of GROUP_ORDER) result.set(g, []);
+  for (const m of modulesForPermissions(permissions)) {
+    const group = m.group ?? "obchod";
+    result.get(group)!.push(m);
+  }
+  return result;
 }

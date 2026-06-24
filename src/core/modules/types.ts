@@ -4,6 +4,18 @@
 
 export type ModuleAction = "view" | "viewall" | "export" | "edit" | "admin";
 
+/** Skupina v navigaci („nadmenu"). Default je „obchod". */
+export type ModuleGroup = "obchod" | "marketing";
+
+/** Lidské popisky skupin (jediné místo). */
+export const GROUP_LABELS: Record<ModuleGroup, string> = {
+  obchod: "Obchod",
+  marketing: "Marketing",
+};
+
+/** Pořadí, v jakém se skupiny vykreslují v navigaci. */
+export const GROUP_ORDER: ModuleGroup[] = ["obchod", "marketing"];
+
 /** Lidsky čitelné popisy akcí (pro administraci práv). */
 export const ACTION_LABELS: Record<ModuleAction, string> = {
   view: "Zobrazení",
@@ -28,6 +40,8 @@ export interface ModuleDefinition {
   actions: ModuleAction[];
   /** Pořadí v menu. */
   poradi: number;
+  /** Skupina v navigaci. Když chybí, modul spadne pod „obchod". */
+  group?: ModuleGroup;
 }
 
 /** Sestaví klíč oprávnění modulu, např. ("stock","view") → "stock.view". */
