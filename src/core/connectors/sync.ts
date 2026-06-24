@@ -28,8 +28,22 @@ function syncSince(cursor: string | null): Date {
 }
 
 /**
- * Spustí synchronizaci jednoho konektoru. Volá se DETACHED (`void runConnectorSync`)
- * po nastavení stavu na „processing" (stejně jako u feedu odběratele). UI poll-uje.
+ * Atomicky „zabere" konektor pro synchronizaci (přepne `idle/ok/error` → `processing`
+ * jednou DB operací). Vrací true, pokud se zábor povedl — false znamená, že konektor
+ * už zpracovává jiný běh (nebo je neaktivní/smazaný). Tím se brání souběžnému
+ * dvojímu syncu téhož konektoru (ruční tlačítko × scheduler tick).
+ */
+async function claimConnector(connectorId: string): Promise<boolean> {
+  const claimed = await prisma.connector.updateMany({
+    where: { id: connectorId, active: true, syncStatus: { not: "processing" } },
+    data: { syncStatus: "processing", lastError: null },
+  });
+  return claimed.count === 1;
+}
+
+/**
+ * Provede synchronizaci konektoru, který už je ve stavu „processing" (zabraný přes
+ * `startConnectorSync`). Volá se DETACHED a NIKDY nehází ven — stav uzavře na ok/error.
  */
 export async function runConnectorSync(connectorId: string): Promise<void> {
   try {
@@ -102,13 +116,12 @@ export async function runConnectorSync(connectorId: string): Promise<void> {
 }
 
 /**
- * Nastaví konektor na „processing" a odpálí job na POZADÍ (bez čekání).
- * Sdílí stock/feed vzor: request neblokuje, UI poll-uje stav.
+ * JEDINÁ start cesta pro sync (volá ji ruční akce i scheduler). Atomicky zabere
+ * konektor a teprve při úspěchu odpálí job na POZADÍ (bez čekání). Request neblokuje,
+ * UI poll-uje stav. Vrací, zda se sync skutečně spustil (false = už běžel).
  */
-export async function startConnectorSync(connectorId: string): Promise<void> {
-  await prisma.connector.update({
-    where: { id: connectorId },
-    data: { syncStatus: "processing", lastError: null },
-  });
-  void runConnectorSync(connectorId);
+export async function startConnectorSync(connectorId: string): Promise<boolean> {
+  const claimed = await claimConnector(connectorId);
+  if (claimed) void runConnectorSync(connectorId);
+  return claimed;
 }

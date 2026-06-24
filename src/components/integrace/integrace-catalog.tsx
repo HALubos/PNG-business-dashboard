@@ -105,9 +105,17 @@ function StatusBadge({ card }: { card: CatalogCard }) {
       </Badge>
     );
   }
+  if (s === "ok") {
+    return (
+      <Badge variant="success">
+        <CheckCircle2 className="mr-1 size-3" /> Připojeno
+      </Badge>
+    );
+  }
+  // idle (default po připojení, před prvním syncem) / neznámý stav — ne „úspěch".
   return (
-    <Badge variant="success">
-      <CheckCircle2 className="mr-1 size-3" /> Připojeno
+    <Badge variant="secondary">
+      <Clock className="mr-1 size-3" /> Nesynchronizováno
     </Badge>
   );
 }
@@ -125,14 +133,14 @@ function CardItem({
     ConnectorActionState,
     FormData
   >(connectConnectorAction, {});
-  const [, disconnectAction, disconnecting] = useActionState<
+  const [disconnectState, disconnectAction, disconnecting] = useActionState<
     ConnectorActionState,
     FormData
   >(disconnectConnectorAction, {});
-  const [, syncAction, syncing] = useActionState<ConnectorActionState, FormData>(
-    syncConnectorAction,
-    {},
-  );
+  const [syncState, syncAction, syncing] = useActionState<
+    ConnectorActionState,
+    FormData
+  >(syncConnectorAction, {});
 
   const connected = !!card.connector;
   const processing = card.connector?.syncStatus === "processing";
@@ -214,6 +222,12 @@ function CardItem({
                 </Button>
               </form>
             </div>
+            {syncState.error || disconnectState.error ? (
+              <p className="flex items-center gap-1.5 text-xs text-[var(--destructive)]">
+                <AlertTriangle className="size-3.5" />{" "}
+                {syncState.error || disconnectState.error}
+              </p>
+            ) : null}
           </>
         ) : card.kind === "url_feed" ? (
           <form action={connectAction} className="space-y-2">

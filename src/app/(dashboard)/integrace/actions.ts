@@ -58,10 +58,12 @@ export async function connectConnectorAction(
   const feedUrl = String(formData.get("feedUrl") ?? "").trim();
   if (!feedUrl) return { error: "Zadejte URL feedu." };
 
-  // Upsert dle (projectId, type) — opětovné připojení přepíše URL.
+  // Upsert dle (projectId, type) — opětovné připojení přepíše URL. Cursor se NULUJE:
+  // „Připojit" znamená založit zdroj nanovo, takže další sync backfilluje od začátku
+  // (jinak by reconnect s jinou URL pokračoval od starého cursoru a historii vynechal).
   const connector = await prisma.connector.upsert({
     where: { projectId_type: { projectId, type } },
-    update: { feedUrl, active: true, nazev: adapter.nazev },
+    update: { feedUrl, active: true, nazev: adapter.nazev, cursor: null },
     create: {
       projectId,
       type,

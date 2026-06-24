@@ -6,5 +6,5 @@ export async function register() {
   const { startConnectorScheduler } = await import(
     "@/core/connectors/scheduler"
   );
-  startConnectorScheduler();
+  await startConnectorScheduler();
 }
