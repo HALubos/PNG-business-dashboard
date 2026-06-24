@@ -4,6 +4,7 @@ import { stockModule } from "./stock/module";
 import { analyticsModule } from "./analytics/module";
 import { resellersModule } from "./resellers/module";
 import { mktAdsModule } from "./mkt_ads/module";
+import { mktAnalyticsModule } from "./mkt_analytics/module";
 
 // ─────────────────────────────────────────────────────────────
 // REGISTR MODULŮ
@@ -14,6 +15,7 @@ const MODULES: ModuleDefinition[] = [
   analyticsModule,
   resellersModule,
   mktAdsModule,
+  mktAnalyticsModule,
 ];
 
 /** Všechny zaregistrované moduly, seřazené dle pořadí. */

@@ -1,4 +1,4 @@
-import { Plug } from "lucide-react";
+import { Plug, CheckCircle2, AlertTriangle } from "lucide-react";
 
 import { requirePermission } from "@/core/auth/session";
 import { prisma } from "@/lib/prisma";
@@ -12,13 +12,37 @@ import {
 
 const PROJECTS_VIEWALL = "admin.projects";
 
+// Výsledek OAuth roundtripu (z ?oauth=…) → hláška uživateli.
+const OAUTH_NOTICES: Record<string, { ok: boolean; text: string }> = {
+  ok: {
+    ok: true,
+    text: "Konektor připojen. Stahování dat běží na pozadí — stav uvidíte u karty.",
+  },
+  error: {
+    ok: false,
+    text: "Připojení přes Google se nezdařilo. Zkuste to prosím znovu.",
+  },
+  norefresh: {
+    ok: false,
+    text: "Google nevrátil obnovovací token. Odeberte přístup aplikace v účtu Google a připojte znovu.",
+  },
+  noconfig: {
+    ok: false,
+    text: "GA4 OAuth není nakonfigurováno — chybí GOOGLE_OAUTH_CLIENT_ID / SECRET v .env.",
+  },
+  badproperty: {
+    ok: false,
+    text: "Neplatné GA4 Property ID — zadejte číslo (např. 123456789).",
+  },
+};
+
 export default async function IntegracePage({
   searchParams,
 }: {
-  searchParams: Promise<{ projekt?: string }>;
+  searchParams: Promise<{ projekt?: string; oauth?: string }>;
 }) {
   const user = await requirePermission("admin.connectors");
-  const { projekt } = await searchParams;
+  const { projekt, oauth } = await searchParams;
 
   const projects = await getVisibleProjects(user, PROJECTS_VIEWALL);
 
@@ -41,6 +65,8 @@ export default async function IntegracePage({
       })
     : [];
   const byType = new Map(connectors.map((c) => [c.type, c]));
+
+  const notice = oauth ? OAUTH_NOTICES[oauth] : null;
 
   // Katalog karet z REGISTRU adaptérů (nový adaptér = nová karta automaticky).
   const cards: CatalogCard[] = allConnectorAdapters().map((a) => {
@@ -80,6 +106,23 @@ export default async function IntegracePage({
           </p>
         </div>
       </div>
+
+      {notice ? (
+        <div
+          className={`flex items-start gap-3 rounded-lg border p-4 text-sm ${
+            notice.ok
+              ? "border-[var(--success)]/30 bg-[var(--success)]/10 text-[var(--success)]"
+              : "border-[var(--destructive)]/30 bg-[var(--destructive)]/10 text-[var(--destructive)]"
+          }`}
+        >
+          {notice.ok ? (
+            <CheckCircle2 className="mt-0.5 size-5 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 size-5 shrink-0" />
+          )}
+          <p>{notice.text}</p>
+        </div>
+      ) : null}
 
       {selected ? (
         <IntegraceCatalog

@@ -58,9 +58,9 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
   - **Konektor vrstva** `src/core/connectors/`: modely `Connector` + enumy
     `ConnectorKind`/`ConnectorType`/`SyncStatus`, abstrakce `ConnectorAdapter`
     (vč. katalogových metadat) a registr adaptérů (`registry.ts`). Adaptér
-    **`shoptet_orders` je reálný** (viz „Dávka 2" níže); `ga4`, `google_ads`,
-    `meta_ads`, `sklik` jsou zatím **placeholdery** (`sync()` vrací prázdno;
-    OAuth = „brzy", disabled).
+    **`shoptet_orders`** (Dávka 2) i **`ga4`** (Dávka 3, OAuth) jsou reálné;
+    `google_ads`, `meta_ads`, `sklik` jsou zatím **placeholdery** (`sync()` vrací
+    prázdno; OAuth = „brzy", disabled).
   - **Kanonika metrik** `metrics.ts` (`CANONICAL_METRICS`: cost/revenue/impressions/
     clicks/conversions/sessions/users) + model `MetricFact`. **Odvozená KPI**
     (ROAS/PNO/konverzní poměr) v `kpi.ts` — JEDINÉ místo (anti-drift), vč.
@@ -109,9 +109,40 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
     **projekt (značka) + období + přepínač DPH**, export XLSX/CSV (právo `mkt_ads.export`).
     Čte **výhradně** přes `MetricFact`/`kpi.ts` (datová vrstva `src/modules/mkt_ads/
     data.ts`, období `period.ts`), scope přes `project-scope.ts`. Náklady jsou zatím
-    0 (reklamní konektory = dávka 3+). Manažer má práva modulu, Admin vše.
+    0 (reklamní konektory = dávka 4+). Manažer má práva modulu, Admin vše.
+- **Marketingová větev — Dávka 3 (GA4 OAuth konektor + modul Web analytika) HOTOVO.**
+  - **Adaptér `ga4` (reálný `sync()`, `kind: oauth_api`)** — `src/core/connectors/
+    adapters/ga4.ts`. PRVNÍ OAuth konektor. Volá GA4 **Analytics Data API**
+    (`v1beta runReport`, dimenze `date`, metriky `sessions`/`totalUsers`/`conversions`/
+    `purchaseRevenue`) → denní `MetricFact` (`source = ga4`): `sessions`, `users`,
+    `conversions` a **`revenue` jen jako KONTROLNÍ** (pravidlo priority v `kpi.ts` ho
+    přebíjí e-shopem; kde Shoptet není, GA4 je fallback tržeb — proto GA4 **nemá**
+    `overridesRevenue`). GA4 vrací úplné denní agregáty (žádný částečný den), data ale
+    dozrávají → re-fetch `TRAILING_REFETCH_DAYS` zpět. Tripwiry jako u shoptetu
+    (první sync bez dat = chyba; inkrement bez dat = prázdno). Stránkování přes
+    `offset/limit`. Refresh access tokenu při každém syncu (Google refresh token se
+    nerotuje). `propertyId` + `refreshToken` jsou v **`credentialsEnc`** (šifrovaně,
+    bez schema změny).
+  - **OAuth flow (vzor pro budoucí OAuth konektory)** — `src/core/connectors/oauth/
+    google.ts` (authUrl / exchange / refresh + `encodeState`/`decodeState` = state
+    šifrovaný `CONNECTOR_ENC_KEY`, AES-GCM → integrita). Route handlery
+    `src/app/api/connectors/ga4/{start,callback}/route.ts`: **start** (GET z formuláře
+    karty, předá `projectId`+`propertyId`) přesměruje na Google consent
+    (`access_type=offline` + `prompt=consent` → refresh token); **callback** vymění
+    `code` za tokeny, upsertne `Connector` (cursor null = backfill) a spustí
+    `startConnectorSync`. Secrety (`GOOGLE_OAUTH_CLIENT_ID/SECRET`) zadává člověk do
+    `.env`; `redirect_uri` = `<NEXTAUTH_URL>/api/connectors/ga4/callback` (registruj
+    v Google Cloud). Integrace karta GA4 je `comingSoon: false` s OAuth formulářem
+    (Property ID + „Připojit přes Google"); výsledek roundtripu → banner (`?oauth=…`).
+  - **Modul `mkt_analytics` „Web analytika"** (group `marketing`, klíč `mkt_analytics`,
+    `/marketing/web-analytika`). KPI **z `kpi.ts`** (návštěvy, uživatelé, konverze,
+    konverzní poměr) + grafy (denní návštěvnost, týdenní trend — lehké CSS sloupce).
+    Filtr projekt + období, export XLSX/CSV (právo `mkt_analytics.export`). Čte
+    **výhradně** přes `MetricFact`/`kpi.ts` (`src/modules/mkt_analytics/data.ts`),
+    období + `getProjectDateBounds` + `isoWeekLabel` **sdílí s `mkt_ads`** (anti-drift).
+    Manažer má práva modulu, Admin vše.
 - **Marketing — další dávky (NEDĚLAT bez zadání):** reálné `sync()` OAuth adaptérů
-  (GA4, Google/Meta Ads, Sklik), OAuth flow, modul `mkt_analytics` (Web analytika).
+  (Google/Meta Ads, Sklik), jejich OAuth flow.
 - **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka jako úplně nové listingy, automatické
   (cron) stahování feedů **v obchodní větvi**, produkční hosting. Nové moduly se
   přidávají na zadání.
@@ -228,7 +259,8 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 /
 ├─ docker-compose.yml         # lokální PostgreSQL
 ├─ .env.example / .env.local  # env (DATABASE_URL, AUTH_SECRET, SEED_*, STOCK_FEED_URL,
-│                             #   CONNECTOR_ENC_KEY, MARKETING_SYNC_INTERVAL_MIN, MARKETING_BACKFILL_FROM)
+│                             #   CONNECTOR_ENC_KEY, MARKETING_SYNC_INTERVAL_MIN, MARKETING_BACKFILL_FROM,
+│                             #   GOOGLE_OAUTH_CLIENT_ID/SECRET)
 ├─ prisma.config.ts           # Prisma 7 config (URL pro migrace + seed)
 ├─ ZADANI-dashboard-v1.md     # plné zadání · CLAUDE.md · README.md
 ├─ prisma/
@@ -243,18 +275,21 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  │  ├─ (auth)/login/        # přihlášení + server action
 │  │  ├─ (dashboard)/         # layout s navigací dle práv
 │  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/ · odberatele/ · integrace/ · reklamni-vykon/
-│  │  └─ api/{auth,stock/export,analytics/export,mkt-ads/export}/
+│  │  └─ api/{auth,stock/export,analytics/export,mkt-ads/export,mkt-analytics/export,
+│  │     │      connectors/ga4/{start,callback}}/  # GA4 OAuth flow
+│  │     └─ (dashboard)/marketing/web-analytika/    # modul mkt_analytics
 │  ├─ instrumentation.ts      # start in-process scheduleru konektorů (Node runtime)
 │  ├─ core/
 │  │  ├─ auth/                # auth.config.ts, auth.ts, session.ts, password.ts
 │  │  ├─ modules/             # registry.ts (REGISTR + modulesByGroup), types.ts (+ group/GROUP_LABELS)
 │  │  ├─ projects/            # project-scope.ts (scope značek)
-│  │  ├─ connectors/          # types (adaptér+katalog), registry, adapters/, metrics, kpi, sync, scheduler, crypto
+│  │  ├─ connectors/          # types (adaptér+katalog), registry, adapters/, oauth/ (google), metrics, kpi, sync, scheduler, crypto
 │  │  └─ rbac/                # access.ts (can/assert), permissions.ts (+ admin.connectors/projects)
 │  ├─ modules/stock/          # constants, opportunities, rules, reseller-scope, import/, feed/, components/
 │  ├─ modules/analytics/      # aggregate (žebříčky + trend), components/
 │  ├─ modules/resellers/      # feed/ (formats registr + feed-stream + service, proudově), components/
 │  ├─ modules/mkt_ads/        # data (MetricFact→KPI), period, components/ (toolbar + grafy)
+│  ├─ modules/mkt_analytics/  # Web analytika: data (MetricFact→KPI), components/ (toolbar + grafy)
 │  ├─ components/{ui,dashboard,integrace}/
 │  ├─ lib/{prisma,utils}.ts
 │  └─ generated/prisma/       # generovaný Prisma klient (mimo git)

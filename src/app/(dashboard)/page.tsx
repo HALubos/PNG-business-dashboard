@@ -5,6 +5,7 @@ import {
   BarChart3,
   Store,
   Megaphone,
+  LineChart,
   ArrowRight,
   ShieldAlert,
   type LucideIcon,
@@ -27,6 +28,7 @@ const TILE_ICONS: Record<string, LucideIcon> = {
   BarChart3,
   Store,
   Megaphone,
+  LineChart,
 };
 
 export default async function DashboardHomePage({
