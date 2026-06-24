@@ -9,7 +9,8 @@ import type { ConnectorType } from "@/generated/prisma/client";
 
 export const CANONICAL_METRICS = [
   "cost", // náklady (reklamní platformy)
-  "revenue", // tržby (e-shop / GA4)
+  "revenue", // tržby BEZ DPH (e-shop / GA4) — kanonický základ
+  "revenue_vat", // DPH část tržby (jen e-shop zdroje) → umožní přepínač „s DPH"
   "impressions", // imprese
   "clicks", // prokliky
   "conversions", // konverze (objednávky / cíle)
@@ -30,6 +31,7 @@ export function isCanonicalMetric(key: string): key is CanonicalMetricKey {
 export const METRIC_LABELS: Record<CanonicalMetricKey, string> = {
   cost: "Náklady",
   revenue: "Tržby",
+  revenue_vat: "DPH z tržeb",
   impressions: "Imprese",
   clicks: "Prokliky",
   conversions: "Konverze",
