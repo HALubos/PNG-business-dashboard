@@ -38,6 +38,14 @@ const OAUTH_NOTICES: Record<string, { ok: boolean; text: string }> = {
     ok: false,
     text: "Neplatné ID účtu Google Ads — zadejte číselné ID (např. 123-456-7890).",
   },
+  badaccount: {
+    ok: false,
+    text: "Neplatné ID reklamního účtu Meta — zadejte číselné ID (act_…).",
+  },
+  nometa: {
+    ok: false,
+    text: "Meta OAuth není nakonfigurováno — chybí META_APP_ID / META_APP_SECRET v .env.",
+  },
 };
 
 export default async function IntegracePage({

@@ -298,6 +298,28 @@ function CardItem({
               <Plug className="size-4" /> Připojit přes Google
             </Button>
           </form>
+        ) : card.kind === "oauth_api" && card.type === "meta_ads" ? (
+          // Meta Ads — OAuth (Facebook Login). Formulář (GET) předá ID reklamního
+          // účtu start route, ta přesměruje na Meta consent (scope ads_read).
+          <form
+            method="get"
+            action="/api/connectors/meta-ads/start"
+            className="space-y-2"
+          >
+            <input type="hidden" name="projectId" value={projectId} />
+            <Input
+              name="adAccountId"
+              inputMode="numeric"
+              required
+              placeholder="ID reklamního účtu (např. act_1234567890)"
+            />
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              Připojení přes Meta (OAuth) — přístup jen pro čtení reklamních dat.
+            </p>
+            <Button type="submit" size="sm">
+              <Plug className="size-4" /> Připojit přes Meta
+            </Button>
+          </form>
         ) : (
           <div className="space-y-2">
             <Button type="button" size="sm" disabled>
