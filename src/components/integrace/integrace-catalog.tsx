@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
   connectConnectorAction,
+  connectSklikAction,
   disconnectConnectorAction,
   syncConnectorAction,
   type ConnectorActionState,
@@ -141,6 +142,10 @@ function CardItem({
     ConnectorActionState,
     FormData
   >(syncConnectorAction, {});
+  const [sklikState, sklikAction, sklikConnecting] = useActionState<
+    ConnectorActionState,
+    FormData
+  >(connectSklikAction, {});
 
   const connected = !!card.connector;
   const processing = card.connector?.syncStatus === "processing";
@@ -319,6 +324,24 @@ function CardItem({
             <Button type="submit" size="sm">
               <Plug className="size-4" /> Připojit přes Meta
             </Button>
+          </form>
+        ) : card.type === "sklik" ? (
+          // Sklik = token-based (ne OAuth roundtrip). Token (+ volitelně userId
+          // účtu) uloží server akce šifrovaně do credentialsEnc.
+          <form action={sklikAction} className="space-y-2">
+            <input type="hidden" name="projectId" value={projectId} />
+            <Input name="apiToken" type="password" required placeholder="Sklik API token" />
+            <Input name="accountId" inputMode="numeric" placeholder="userId účtu — volitelné" />
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              API token z Skliku (Nastavení → API). Pro agenturní přístup zadejte
+              userId účtu.
+            </p>
+            <Button type="submit" size="sm" disabled={sklikConnecting}>
+              <Plug className="size-4" /> {sklikConnecting ? "Připojuji…" : "Připojit"}
+            </Button>
+            {sklikState.error ? (
+              <p className="text-xs text-[var(--destructive)]">{sklikState.error}</p>
+            ) : null}
           </form>
         ) : (
           <div className="space-y-2">
