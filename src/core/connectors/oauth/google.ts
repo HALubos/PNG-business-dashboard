@@ -140,7 +140,7 @@ export async function refreshGoogleAccessToken(
   });
   if (!res.ok) {
     throw new Error(
-      `Obnova OAuth tokenu selhala (${res.status}): ${(await res.text()).slice(0, 300)}. Odpojte a připojte GA4 znovu.`,
+      `Obnova OAuth tokenu selhala (${res.status}): ${(await res.text()).slice(0, 300)}. Odpojte a připojte konektor znovu.`,
     );
   }
   const json = (await res.json()) as GoogleTokens;

@@ -123,6 +123,13 @@ const METRIC_KEYS: CanonicalMetricKey[] = [
   "conversions",
 ];
 
+/**
+ * Auth chyba Meta (token vypršel/odvolán). Je KONEKTOR-WIDE — opakovat další okna
+ * nemá smysl → propaguje se ven (na rozdíl od přechodné chyby okna, která jen
+ * zastaví stahování a už načtená data se emitují).
+ */
+class MetaTokenError extends Error {}
+
 export const metaAdsAdapter: ConnectorAdapter = {
   type: "meta_ads",
   kind: "oauth_api",
@@ -157,47 +164,63 @@ export const metaAdsAdapter: ConnectorAdapter = {
     // Agregace na den: cost/impressions/clicks/conversions.
     const byDay = new Map<number, Record<string, number>>();
 
+    // Okna stahujeme chronologicky (nejstarší→nejnovější). Přechodná chyba okna
+    // (500/rate-limit/limit stáří) NESMÍ zahodit pokrok ani trvale blokovat konektor:
+    // zastavíme stahování, ale data z už úspěšných (starších) oken se emitují → cursor
+    // se posune a další běh naváže od posledního dne a vadné okno zopakuje. Auth chyba
+    // (token) je výjimka — propaguje se ven (opakovat nemá smysl).
+    let windowError: Error | null = null;
     for (const win of dateWindows(start, end)) {
-      const params = new URLSearchParams({
-        level: "account",
-        time_increment: "1",
-        fields: "spend,impressions,clicks,actions",
-        time_range: JSON.stringify({ since: ymd(win.since), until: ymd(win.until) }),
-        limit: "500",
-        access_token: accessToken,
-      });
-      let url:
-        | string
-        | null = `https://graph.facebook.com/${GRAPH_VERSION}/${accountId}/insights?${params.toString()}`;
+      try {
+        const params = new URLSearchParams({
+          level: "account",
+          time_increment: "1",
+          fields: "spend,impressions,clicks,actions",
+          time_range: JSON.stringify({ since: ymd(win.since), until: ymd(win.until) }),
+          limit: "500",
+          access_token: accessToken,
+        });
+        let url:
+          | string
+          | null = `https://graph.facebook.com/${GRAPH_VERSION}/${accountId}/insights?${params.toString()}`;
 
-      // Stránkování přes `paging.next` (plné URL vrácené Metou).
-      while (url) {
-        const res = await fetch(url);
-        if (!res.ok) {
-          const body = (await res.text()).slice(0, 300);
-          // 190 = token vypršel/odvolán → jasná výzva k reconnectu.
-          if (res.status === 401 || /code\D*190/.test(body)) {
-            throw new Error(
-              "Meta token vypršel nebo byl odvolán — odpojte a připojte Meta Ads znovu.",
-            );
+        // Stránkování přes `paging.next` (plné URL vrácené Metou).
+        while (url) {
+          const res = await fetch(url);
+          if (!res.ok) {
+            const body = (await res.text()).slice(0, 300);
+            // 190 = token vypršel/odvolán → jasná výzva k reconnectu (konektor-wide).
+            if (res.status === 401 || /code\D*190/.test(body)) {
+              throw new MetaTokenError(
+                "Meta token vypršel nebo byl odvolán — odpojte a připojte Meta Ads znovu.",
+              );
+            }
+            throw new Error(`Meta insights selhalo (${res.status}): ${body}`);
           }
-          throw new Error(`Meta insights selhalo (${res.status}): ${body}`);
+          const json = (await res.json()) as InsightsResponse;
+          for (const row of json.data ?? []) {
+            const date = parseDateUtc(row.date_start);
+            if (!date) continue;
+            const dayMs = date.getTime();
+            const agg = byDay.get(dayMs) ?? {};
+            agg.cost = (agg.cost ?? 0) + (Number(row.spend ?? 0) || 0);
+            agg.impressions = (agg.impressions ?? 0) + (Number(row.impressions ?? 0) || 0);
+            agg.clicks = (agg.clicks ?? 0) + (Number(row.clicks ?? 0) || 0);
+            agg.conversions = (agg.conversions ?? 0) + purchaseConversions(row.actions);
+            byDay.set(dayMs, agg);
+          }
+          url = json.paging?.next ?? null;
         }
-        const json = (await res.json()) as InsightsResponse;
-        for (const row of json.data ?? []) {
-          const date = parseDateUtc(row.date_start);
-          if (!date) continue;
-          const dayMs = date.getTime();
-          const agg = byDay.get(dayMs) ?? {};
-          agg.cost = (agg.cost ?? 0) + (Number(row.spend ?? 0) || 0);
-          agg.impressions = (agg.impressions ?? 0) + (Number(row.impressions ?? 0) || 0);
-          agg.clicks = (agg.clicks ?? 0) + (Number(row.clicks ?? 0) || 0);
-          agg.conversions = (agg.conversions ?? 0) + purchaseConversions(row.actions);
-          byDay.set(dayMs, agg);
-        }
-        url = json.paging?.next ?? null;
+      } catch (e) {
+        if (e instanceof MetaTokenError) throw e; // auth: tvrdě skonči
+        windowError = e instanceof Error ? e : new Error("Meta okno selhalo.");
+        break; // přechodná chyba: zastav, ale emituj už načtená okna
       }
     }
+
+    // Přechodná chyba okna: máme-li data, emituj je (pokrok); jinak vyhoď skutečnou
+    // chybu, ať se neschová za zavádějící „žádná data".
+    if (windowError && byDay.size === 0) throw windowError;
 
     // Tripwiry: první sync bez dat = chyba; inkrement bez dat = legitimní prázdno.
     if (byDay.size === 0) {

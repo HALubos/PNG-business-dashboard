@@ -75,6 +75,8 @@ export async function GET(req: NextRequest) {
 
     // Upsert dle (projectId, type): reconnect přepíše tokeny a NULUJE cursor →
     // další sync backfilluje od začátku (stejná logika jako u GA4 / url_feed connect).
+    // syncStatus se NEResetuje (viz `startConnectorSync` — přepis běžícího `processing`
+    // na `idle` by obešel zábor a spustil druhý souběžný sync).
     const connector = await prisma.connector.upsert({
       where: { projectId_type: { projectId: state.projectId, type: "google_ads" } },
       update: {
@@ -83,7 +85,6 @@ export async function GET(req: NextRequest) {
         nazev: adapter.nazev,
         feedUrl: null,
         cursor: null,
-        syncStatus: "idle",
         lastError: null,
       },
       create: {

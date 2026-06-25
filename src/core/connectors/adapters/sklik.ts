@@ -146,12 +146,14 @@ export const sklikAdapter: ConnectorAdapter = {
       }
       return [];
     }
-    const totalCount = Number(report.totalCount ?? 0);
 
-    // 3) Čti report po stránkách, agreguj přes kampaně na den.
+    // 3) Čti report po stránkách, agreguj přes kampaně na den. Konec se pozná podle
+    //    VELIKOSTI stránky (krátká/prázdná stránka = poslední) — NEspoléháme na
+    //    `report.totalCount`: kdyby chybělo/bylo 0, smyčka řízená `offset < totalCount`
+    //    by skončila po 1. stránce a kampaně nad PAGE_LIMIT by se tiše ztratily.
     const byDay = new Map<number, Record<string, number>>();
     let offset = 0;
-    do {
+    for (;;) {
       const page = await sklikCall("campaigns.readReport", [
         authArg,
         reportId,
@@ -178,9 +180,9 @@ export const sklikAdapter: ConnectorAdapter = {
           byDay.set(dayMs, agg);
         }
       }
+      if (rows.length < PAGE_LIMIT) break; // poslední (i prázdná) stránka
       offset += PAGE_LIMIT;
-      if (rows.length === 0) break;
-    } while (offset < totalCount);
+    }
 
     // Tripwiry: první sync bez dat = chyba; inkrement bez dat = legitimní prázdno.
     if (byDay.size === 0) {

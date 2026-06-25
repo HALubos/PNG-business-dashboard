@@ -113,6 +113,9 @@ export async function connectSklikAction(
   if (!adapter) return { error: "Neznámý typ konektoru." };
 
   const credentialsEnc = encryptJson({ apiToken, accountId });
+  // POZN.: syncStatus se zde NEResetuje — kdyby konektor zrovna běžel (`processing`),
+  // přepis na `idle` by obešel atomický zábor `claimConnector` a spustil druhý
+  // souběžný sync. Stav řeší až `startConnectorSync` (claim z jakéhokoli ne-processing).
   const connector = await prisma.connector.upsert({
     where: { projectId_type: { projectId, type: "sklik" } },
     update: {
@@ -121,7 +124,6 @@ export async function connectSklikAction(
       nazev: adapter.nazev,
       feedUrl: null,
       cursor: null,
-      syncStatus: "idle",
       lastError: null,
     },
     create: {
