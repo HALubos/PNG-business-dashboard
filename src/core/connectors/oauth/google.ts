@@ -2,12 +2,17 @@ import { encryptSecret, decryptSecret } from "../crypto";
 
 // ─────────────────────────────────────────────────────────────
 // Google OAuth (Authorization Code flow) — sdílený helper pro OAuth konektory
-// nad Google API (zatím GA4; později Google Ads). Client ID/secret jsou v .env
-// (GOOGLE_OAUTH_CLIENT_ID/SECRET), zadává je ČLOVĚK, ne automat. Tokeny se ukládají
-// ŠIFROVANĚ (crypto.ts) do Connector.credentialsEnc — nikdy plaintext do DB.
+// nad Google API (GA4 i Google Ads). Client ID/secret jsou v .env
+// (GOOGLE_OAUTH_CLIENT_ID/SECRET, SDÍLENÉ oběma), zadává je ČLOVĚK, ne automat.
+// Tokeny se ukládají ŠIFROVANĚ (crypto.ts) do Connector.credentialsEnc — nikdy
+// plaintext do DB.
+//
+// `redirectUri` je per konektor (jiná callback route), proto `googleOAuthConfig`
+// bere `callbackPath`. KAŽDÝ použitý redirect_uri musí být zaregistrovaný v Google
+// Cloud konzoli (GA4 i Google Ads callback).
 //
 // State (přenášený přes OAuth roundtrip) šifrujeme AES-GCM klíčem konektorů →
-// dostáváme integritu i důvěrnost (projectId/propertyId nelze podvrhnout).
+// dostáváme integritu i důvěrnost (projectId/customerId nelze podvrhnout).
 // ─────────────────────────────────────────────────────────────
 
 const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -15,6 +20,13 @@ const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 /** Scope pro čtení GA4 (Analytics Data API) — jen pro čtení. */
 export const GA4_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
+
+/** Scope pro Google Ads API (čtení reportů přes adwords scope). */
+export const GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
+
+/** Callback cesty jednotlivých Google OAuth konektorů (musí být v Google Cloud). */
+export const GA4_CALLBACK_PATH = "/api/connectors/ga4/callback";
+export const GOOGLE_ADS_CALLBACK_PATH = "/api/connectors/google-ads/callback";
 
 export interface GoogleOAuthConfig {
   clientId: string;
@@ -24,10 +36,14 @@ export interface GoogleOAuthConfig {
 
 /**
  * Konfigurace OAuth z .env. Vrací null, když chybí client ID/secret (UI pak
- * uživatele upozorní, že GA4 OAuth není nakonfigurováno). `redirectUri` se odvodí
- * z NEXTAUTH_URL — TOTO URL musí být zaregistrované v Google Cloud konzoli.
+ * uživatele upozorní, že Google OAuth není nakonfigurováno). `redirectUri` se
+ * odvodí z NEXTAUTH_URL + `callbackPath` — TOTO URL musí být zaregistrované v
+ * Google Cloud konzoli. Pro refresh tokenu (kde redirect_uri nehraje roli) lze
+ * `callbackPath` vynechat.
  */
-export function googleOAuthConfig(): GoogleOAuthConfig | null {
+export function googleOAuthConfig(
+  callbackPath: string = GA4_CALLBACK_PATH,
+): GoogleOAuthConfig | null {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
@@ -38,7 +54,7 @@ export function googleOAuthConfig(): GoogleOAuthConfig | null {
   return {
     clientId,
     clientSecret,
-    redirectUri: `${base}/api/connectors/ga4/callback`,
+    redirectUri: `${base}${callbackPath}`,
   };
 }
 

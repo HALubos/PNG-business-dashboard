@@ -34,6 +34,10 @@ const OAUTH_NOTICES: Record<string, { ok: boolean; text: string }> = {
     ok: false,
     text: "Neplatné GA4 Property ID — zadejte číslo (např. 123456789).",
   },
+  badcustomer: {
+    ok: false,
+    text: "Neplatné ID účtu Google Ads — zadejte číselné ID (např. 123-456-7890).",
+  },
 };
 
 export default async function IntegracePage({

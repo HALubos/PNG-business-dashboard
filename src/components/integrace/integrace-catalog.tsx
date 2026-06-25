@@ -271,6 +271,33 @@ function CardItem({
               <Plug className="size-4" /> Připojit přes Google
             </Button>
           </form>
+        ) : card.kind === "oauth_api" && card.type === "google_ads" ? (
+          // Google Ads — OAuth (sdílený Google client). Formulář (GET) předá ID
+          // účtu start route, ta přesměruje na Google consent (scope adwords).
+          <form
+            method="get"
+            action="/api/connectors/google-ads/start"
+            className="space-y-2"
+          >
+            <input type="hidden" name="projectId" value={projectId} />
+            <Input
+              name="customerId"
+              inputMode="numeric"
+              required
+              placeholder="ID účtu Google Ads (např. 123-456-7890)"
+            />
+            <Input
+              name="loginCustomerId"
+              inputMode="numeric"
+              placeholder="ID správce (MCC) — volitelné"
+            />
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              Připojení přes Google (OAuth) — přístup jen pro čtení reportů Google Ads.
+            </p>
+            <Button type="submit" size="sm">
+              <Plug className="size-4" /> Připojit přes Google
+            </Button>
+          </form>
         ) : (
           <div className="space-y-2">
             <Button type="button" size="sm" disabled>
