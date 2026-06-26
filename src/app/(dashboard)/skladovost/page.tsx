@@ -149,13 +149,13 @@ export default async function SkladovostPage({
             {selectedReseller ? (
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm">
-                    <Badge variant="default" className="mr-2">
-                      {selectedReseller.domena}
-                    </Badge>
-                    <strong>{opportunities.length}</strong> příležitostí k
-                    nabídce
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <Badge variant="default">{selectedReseller.domena}</Badge>
+                    <span>
+                      <strong>{opportunities.length}</strong> příležitostí k
+                      nabídce
+                    </span>
+                  </div>
                   {canExport && opportunities.length > 0 ? (
                     <div className="flex gap-2">
                       <Button asChild variant="outline" size="sm">

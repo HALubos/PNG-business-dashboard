@@ -48,10 +48,10 @@ export default async function DashboardHomePage({
         <h1 className="text-2xl font-semibold">
           Vítejte, {user.jmeno.split(" ")[0]}.
         </h1>
-        <p className="text-[var(--muted-foreground)]">
+        <div className="flex flex-wrap items-center gap-1.5 text-[var(--muted-foreground)]">
           Role: <Badge variant="secondary">{user.roleName}</Badge>{" "}
           — níže jsou moduly, na které máte právo.
-        </p>
+        </div>
       </div>
 
       {forbidden ? (
