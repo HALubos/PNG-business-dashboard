@@ -5,6 +5,7 @@ import { ga4Adapter } from "./adapters/ga4";
 import { googleAdsAdapter } from "./adapters/google-ads";
 import { metaAdsAdapter } from "./adapters/meta-ads";
 import { sklikAdapter } from "./adapters/sklik";
+import { heurekaAdapter } from "./adapters/heureka";
 
 // ─────────────────────────────────────────────────────────────
 // REGISTR KONEKTORŮ
@@ -18,6 +19,7 @@ const ADAPTERS: ConnectorAdapter[] = [
   googleAdsAdapter,
   metaAdsAdapter,
   sklikAdapter,
+  heurekaAdapter,
 ];
 
 /** Všechny zaregistrované adaptéry (pořadí = pořadí v poli). */

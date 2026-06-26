@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import {
   connectConnectorAction,
   connectSklikAction,
+  connectHeurekaAction,
   disconnectConnectorAction,
   syncConnectorAction,
   type ConnectorActionState,
@@ -146,6 +147,10 @@ function CardItem({
     ConnectorActionState,
     FormData
   >(connectSklikAction, {});
+  const [heurekaState, heurekaAction, heurekaConnecting] = useActionState<
+    ConnectorActionState,
+    FormData
+  >(connectHeurekaAction, {});
 
   const connected = !!card.connector;
   const processing = card.connector?.syncStatus === "processing";
@@ -341,6 +346,28 @@ function CardItem({
             </Button>
             {sklikState.error ? (
               <p className="text-xs text-[var(--destructive)]">{sklikState.error}</p>
+            ) : null}
+          </form>
+        ) : card.type === "heureka" ? (
+          // Heureka = token-based (jako Sklik). API klíč uloží server akce šifrovaně;
+          // volitelná URL katalogového feedu (cena/kategorie pro bidding) jde do feedUrl.
+          <form action={heurekaAction} className="space-y-2">
+            <input type="hidden" name="projectId" value={projectId} />
+            <Input name="apiKey" type="password" required placeholder="Heureka API klíč" />
+            <Input
+              name="catalogUrl"
+              type="url"
+              placeholder="URL katalogového XML feedu — volitelné"
+            />
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              API klíč z Heureky (x-heureka-api-key). Katalogový feed zpřesní bidding
+              (cena, kategorie, dostupnost).
+            </p>
+            <Button type="submit" size="sm" disabled={heurekaConnecting}>
+              <Plug className="size-4" /> {heurekaConnecting ? "Připojuji…" : "Připojit"}
+            </Button>
+            {heurekaState.error ? (
+              <p className="text-xs text-[var(--destructive)]">{heurekaState.error}</p>
             ) : null}
           </form>
         ) : (

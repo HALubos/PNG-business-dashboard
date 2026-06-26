@@ -169,8 +169,43 @@ produkty, které jeho odběratel vyprodal, ale my je máme skladem.
     Peníze v haléřích → ÷100 = CZK. Připojení server akcí `connectSklikAction` (token +
     volitelně `userId` účtu, šifrovaně do `credentialsEnc`); fallback `SKLIK_API_TOKEN`.
     Karta = token formulář (žádná start/callback route).
-- **Marketing — další dávky (NEDĚLAT bez zadání):** srovnávače (Heureka/Zboží/Glami),
-  affiliate (RTB House/CJ), e-mail, sociální organic, AI analýza webu.
+- **Marketingová větev — Dávka 5 (Heureka konektor + modul „Optimalizace srovnávačů") HOTOVO.**
+  - **Adaptér `heureka`** (`adapters/heureka.ts`, TOKEN-based jako Sklik, `category:
+    "srovnavace"`) — `GET /v1/reports/conversions?date=YYYY-MM-DD` (hlavička
+    `x-heureka-api-key`) den po dni → denní `MetricFact` (`cost` bez DPH, `clicks`,
+    `conversions`, `revenue` jako **KONTROLNÍ** — BEZ `overridesRevenue`, přebíjí ho
+    e-shop, jako GA4). Trailing refetch 3 dny, tripwiry. Heureka je v Reklamním výkonu
+    v ROAS/PNO vedle Google/Meta/Sklik (náklady se v `kpi.ts` jen sčítají). Připojení
+    `connectHeurekaAction` (API klíč šifrovaně do `credentialsEnc`; volitelná URL
+    katalogového feedu do `feedUrl`); fallback `HEUREKA_API_KEY`.
+  - **Per-produktová vrstva `ProductMetricFact`** (per projekt+zdroj+den+`itemId`:
+    clicks/cost/orders/revenue + `categoryId`/`name`) — detailní vrstva pod
+    `MetricFact`, plněná **týmž** heureka syncem. KPI zůstávají nad `MetricFact`/
+    `kpi.ts` (anti-drift). `itemId` = `shop_item.id` == feed `ITEM_ID` == SKU.
+  - **Modul `mkt_bidding` „Optimalizace srovnávačů"** (group `marketing`, klíč
+    `mkt_bidding`, `/marketing/optimalizace`). PRVNÍ „akční" (write-out) marketingový
+    modul. **Engine** (`engine.ts`, čistá funkce, 14 testů `npm test`) počítá optimální
+    CPC v **tvrdých mantinelech**: `floor ≤ CPC ≤ break-even (= marže×RPC)`, denní limit
+    `±25 %`, round `0,01`, nedostupné/neziskové → bez bidu. **Fáze A** (bootstrap, málo
+    dat) / **Fáze B** (PNO k cíli `1/target_roas`, default ROAS 3,0; přepínač 3,5/3,0/2,5).
+    Pauza po ≥60 proklicích bez objednávky. Config v `config.ts` (defaulty + `.env`).
+  - **Podklady enginu:** ceník floor CPC (`pricelist.ts`, `cenik-standard-cz.csv`,
+    `sekceId`==`portal_category.id`), marže/maxCPA per interní kategorie (`margins.ts`,
+    `PPC_nastavení.xlsx`, listy per značka, fallback celoznačková marže), mapování
+    produkt→interní kategorie (`category-map.ts` z `CATEGORYTEXT` + override JSON),
+    katalog (`catalog.ts` → `ProductCatalogItem`, PROUDOVĚ z Heureka XML feedu vzorem
+    `feed-stream.ts`, dostupnost přes `OurStockItem` dle EANu). Cesty přes `.env`
+    (`HEUREKA_PRICELIST_PATH`/`HEUREKA_MARGIN_PATH`/`HEUREKA_CATEGORY_MAP_PATH`), soubory
+    v `data/sample/heureka/` (mimo git).
+  - **Výstup = schválení.** Pluggable output adaptér (`output/registry.ts`): **ebrana**
+    (reálný — zapíše CPC do importního `.xlsx`, klíč SKU + sloupec „Maximální cena za
+    proklik - Heureka 2012"), shoptet `comingSoon`. Route `/api/mkt-bidding/export`:
+    `?format=ebrana` (= schválení → uloží bidy do `BiddingBid` pro příští denní diff/
+    limit) | `?format=review` (CSV s důvody). `mkt_bidding` práva: Manažer view/viewall/
+    export/edit, Admin vše. Tlačítko „Obnovit katalog" (`mkt_bidding.edit`).
+- **Marketing — další dávky (NEDĚLAT bez zadání):** srovnávače **Zboží.cz/Glami**
+  (Heureka hotová — připrav jako další `source` + output adaptér), affiliate (RTB
+  House/CJ), e-mail, sociální organic, AI analýza webu.
 - **Fáze 2+ — NEDĚLAT teď:** Vario, Heureka jako úplně nové listingy, automatické
   (cron) stahování feedů **v obchodní větvi**, produkční hosting. Nové moduly se
   přidávají na zadání.
@@ -289,13 +324,15 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 ├─ .env.example / .env.local  # env (DATABASE_URL, AUTH_SECRET, SEED_*, STOCK_FEED_URL,
 │                             #   CONNECTOR_ENC_KEY, MARKETING_SYNC_INTERVAL_MIN, MARKETING_BACKFILL_FROM,
 │                             #   GOOGLE_OAUTH_CLIENT_ID/SECRET, GOOGLE_ADS_DEVELOPER_TOKEN,
-│                             #   META_APP_ID/SECRET, SKLIK_API_TOKEN)
+│                             #   META_APP_ID/SECRET, SKLIK_API_TOKEN, HEUREKA_API_KEY,
+│                             #   HEUREKA_PRICELIST_PATH/MARGIN_PATH/CATEGORY_MAP_PATH, BIDDING_*)
 ├─ prisma.config.ts           # Prisma 7 config (URL pro migrace + seed)
 ├─ ZADANI-dashboard-v1.md     # plné zadání · CLAUDE.md · README.md
 ├─ prisma/
 │  ├─ schema.prisma           # User, Role, Permission, Module, Reseller(+feed), RepCustomer, AuditLog,
 │  │                          #   ImportSnapshot, Product, ResellerProductAvailability, StockConfig, OurStockItem, ResellerFeedItem,
-│  │                          #   Project, Connector, MetricFact (+ enumy ConnectorKind/ConnectorType/SyncStatus)
+│  │                          #   Project, Connector, MetricFact, ProductMetricFact, ProductCatalogItem, BiddingBid
+│  │                          #   (+ enumy ConnectorKind/ConnectorType{…,heureka}/SyncStatus)
 │  ├─ migrations/             # SQL migrace
 │  └─ seed.ts                 # admin Lubos + 3 zástupci + role/práva + modul + StockConfig
 ├─ src/
@@ -304,25 +341,26 @@ soubor: `data/sample/` (ručně tam zkopíruj export, do gitu se necommituje).
 │  │  ├─ (auth)/login/        # přihlášení + server action
 │  │  ├─ (dashboard)/         # layout s navigací dle práv
 │  │  │  ├─ page.tsx          # rozcestník · admin/ · skladovost/ · analytika/ · odberatele/ · integrace/ · reklamni-vykon/
-│  │  └─ api/{auth,stock/export,analytics/export,mkt-ads/export,mkt-analytics/export,
+│  │  └─ api/{auth,stock/export,analytics/export,mkt-ads/export,mkt-analytics/export,mkt-bidding/export,
 │  │     │      connectors/{ga4,google-ads,meta-ads}/{start,callback}}/  # OAuth flow
-│  │     └─ (dashboard)/marketing/web-analytika/    # modul mkt_analytics
+│  │     └─ (dashboard)/marketing/{web-analytika,optimalizace}/    # moduly mkt_analytics, mkt_bidding
 │  ├─ instrumentation.ts      # start in-process scheduleru konektorů (Node runtime)
 │  ├─ core/
 │  │  ├─ auth/                # auth.config.ts, auth.ts, session.ts, password.ts
 │  │  ├─ modules/             # registry.ts (REGISTR + modulesByGroup), types.ts (+ group/GROUP_LABELS)
 │  │  ├─ projects/            # project-scope.ts (scope značek)
-│  │  ├─ connectors/          # types (adaptér+katalog), registry, adapters/ (shoptet/ga4/google-ads/meta-ads/sklik), oauth/ (google+meta), metrics, kpi, sync, scheduler, crypto
+│  │  ├─ connectors/          # types (adaptér+katalog), registry, adapters/ (shoptet/ga4/google-ads/meta-ads/sklik/heureka), oauth/ (google+meta), metrics, kpi, sync, scheduler, crypto
 │  │  └─ rbac/                # access.ts (can/assert), permissions.ts (+ admin.connectors/projects)
 │  ├─ modules/stock/          # constants, opportunities, rules, reseller-scope, import/, feed/, components/
 │  ├─ modules/analytics/      # aggregate (žebříčky + trend), components/
 │  ├─ modules/resellers/      # feed/ (formats registr + feed-stream + service, proudově), components/
 │  ├─ modules/mkt_ads/        # data (MetricFact→KPI), period, components/ (toolbar + grafy)
 │  ├─ modules/mkt_analytics/  # Web analytika: data (MetricFact→KPI), components/ (toolbar + grafy)
+│  ├─ modules/mkt_bidding/    # engine(+test), config, pricelist, margins, category-map, catalog, data, output/ (ebrana), components/
 │  ├─ components/{ui,dashboard,integrace}/
 │  ├─ lib/{prisma,utils}.ts
 │  └─ generated/prisma/       # generovaný Prisma klient (mimo git)
-└─ data/sample/               # vzorový Price Check XLSX (mimo git)
+└─ data/sample/               # Price Check XLSX + heureka/ (cenik, PPC_nastavení, ebrana_import) — mimo git
 ```
 
 ### Přidání nového modulu (bez zásahu do jádra)
@@ -340,6 +378,7 @@ npm run db:seed               # admin + zástupci + role/práva + modul + config
 npm run dev                   # Next.js dev server (http://localhost:3000)
 npm run db:studio             # Prisma Studio
 npm run typecheck             # tsc --noEmit  ·  npm run lint  ·  npm run build
+npm test                      # node:test (engine bidding) — src/**/*.test.ts
 ```
 
 Seed účty (heslo `heslo123`): `lubos@activent365.cz` (Admin),

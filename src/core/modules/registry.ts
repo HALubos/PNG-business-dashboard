@@ -4,6 +4,7 @@ import { stockModule } from "./stock/module";
 import { analyticsModule } from "./analytics/module";
 import { resellersModule } from "./resellers/module";
 import { mktAdsModule } from "./mkt_ads/module";
+import { mktBiddingModule } from "./mkt_bidding/module";
 import { mktAnalyticsModule } from "./mkt_analytics/module";
 
 // ─────────────────────────────────────────────────────────────
@@ -15,6 +16,7 @@ const MODULES: ModuleDefinition[] = [
   analyticsModule,
   resellersModule,
   mktAdsModule,
+  mktBiddingModule,
   mktAnalyticsModule,
 ];
 
