@@ -255,6 +255,8 @@ model Project {
   connectors    Connector[]
   metrics       MetricFact[]
   productMetrics ProductMetricFact[]
+  catalogItems  ProductCatalogItem[]
+  biddingBids   BiddingBid[]
 }
 
 // Rodina zdroje: URL feed (pull, bez OAuth) vs. OAuth API (token + refresh).
@@ -344,4 +346,41 @@ model ProductMetricFact {
   @@unique([projectId, source, date, itemId])
   @@index([projectId, date])
   @@index([projectId, source, itemId])
+}
+
+// Katalog produktů z XML feedu srovnávače (cena, kategorie, dostupnost) — vstup
+// bidding enginu. Plní se PROUDOVĚ (vzor feed-stream.ts) ze `Connector.feedUrl`.
+// Klíč `itemId` (ITEM_ID == SKU == shop_item.id) páruje s per-produkt metrikami.
+// Dostupnost se počítá z DELIVERY_DATE feedu, zpřesněná naším skladem (OurStockItem dle EANu).
+model ProductCatalogItem {
+  id               String   @id @default(cuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  itemId           String // ITEM_ID / SKU
+  ean              String?
+  name             String?
+  priceVat         Float? // PRICE_VAT
+  categoryText     String? // CATEGORYTEXT (Heureka.cz | … | …)
+  internalCategory String? // namapovaná interní kategorie značky (pro marži)
+  available        Boolean  @default(true)
+  deliveryDays     Int? // DELIVERY_DATE
+  refreshedAt      DateTime @default(now())
+
+  @@unique([projectId, itemId])
+  @@index([projectId])
+}
+
+// Naposledy SCHVÁLENÝ (vygenerovaný do importu) bid per produkt. Engine z něj bere
+// `current_cpc` pro denní limit změny a diff „staré → navržené CPC". Zapisuje se při
+// generování importu (= schválení) v modulu mkt_bidding.
+model BiddingBid {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  itemId    String
+  cpc       Float
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, itemId])
+  @@index([projectId])
 }

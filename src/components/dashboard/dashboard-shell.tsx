@@ -12,6 +12,7 @@ import {
   Plug,
   Megaphone,
   LineChart,
+  Gauge,
   Menu,
   LogOut,
   ChevronDown,
@@ -46,6 +47,7 @@ const ICONS: Record<string, LucideIcon> = {
   Plug,
   Megaphone,
   LineChart,
+  Gauge,
 };
 
 function iconFor(name: string): LucideIcon {
