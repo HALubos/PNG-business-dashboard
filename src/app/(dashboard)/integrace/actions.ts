@@ -229,6 +229,9 @@ export async function disconnectConnectorAction(
   await prisma.metricFact.deleteMany({
     where: { projectId: connector.projectId, source: connector.type },
   });
+  await prisma.productMetricFact.deleteMany({
+    where: { projectId: connector.projectId, source: connector.type },
+  });
   await prisma.connector.delete({ where: { id: connectorId } });
 
   await prisma.auditLog.create({

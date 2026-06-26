@@ -247,13 +247,14 @@ model OurStockItem {
 
 // Projekt = naše značka (Pinguin / Acepac / Activent).
 model Project {
-  id         String       @id @default(cuid())
-  klic       String       @unique // "pinguin" | "acepac" | "activent"
-  nazev      String
-  web        String? // doména webu (pro pozdější AI profil)
-  createdAt  DateTime     @default(now())
-  connectors Connector[]
-  metrics    MetricFact[]
+  id            String              @id @default(cuid())
+  klic          String              @unique // "pinguin" | "acepac" | "activent"
+  nazev         String
+  web           String? // doména webu (pro pozdější AI profil)
+  createdAt     DateTime            @default(now())
+  connectors    Connector[]
+  metrics       MetricFact[]
+  productMetrics ProductMetricFact[]
 }
 
 // Rodina zdroje: URL feed (pull, bez OAuth) vs. OAuth API (token + refresh).
@@ -318,4 +319,29 @@ model MetricFact {
 
   @@unique([projectId, source, date, metric])
   @@index([projectId, date])
+}
+
+// Per-PRODUKTOVÁ metrika (denní, per projekt+zdroj+produkt) — detailní vrstva pod
+// agregovaným MetricFactem. Nutná pro bidding (modul mkt_bidding): granularita SKU.
+// Generická a aditivní → použitelná i pro budoucí Zboží/Glami a SKU analytiku.
+// KPI se NEPOČÍTAJÍ odsud (zůstávají nad MetricFact/kpi.ts) — anti-drift.
+//   itemId     = shop_item.id (Heureka) == ITEM_ID v katalogovém feedu == SKU
+//   categoryId = portal_category.id == sekceId v ceníku floor CPC
+model ProductMetricFact {
+  id         String        @id @default(cuid())
+  projectId  String
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source     ConnectorType
+  date       DateTime      @db.Date
+  itemId     String // SKU / shop_item.id
+  categoryId Int? // portal_category.id (Heureka sekce)
+  name       String?
+  clicks     Float         @default(0)
+  cost       Float         @default(0)
+  orders     Float         @default(0)
+  revenue    Float         @default(0)
+
+  @@unique([projectId, source, date, itemId])
+  @@index([projectId, date])
+  @@index([projectId, source, itemId])
 }

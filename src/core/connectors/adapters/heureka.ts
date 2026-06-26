@@ -2,6 +2,7 @@ import type { ConnectorAdapter } from "../types";
 import type { CanonicalMetric, CanonicalMetricKey } from "../metrics";
 import { toDay } from "../metrics";
 import { decryptJson } from "../crypto";
+import { prisma } from "@/lib/prisma";
 
 // ─────────────────────────────────────────────────────────────
 // Heureka.cz (srovnávač) — náklady, prokliky, konverze a (kontrolní) tržby.
@@ -114,6 +115,57 @@ export async function fetchHeurekaConversions(
 
 const METRIC_KEYS: CanonicalMetricKey[] = ["cost", "clicks", "conversions", "revenue"];
 
+interface ProductFactAgg {
+  dayMs: number;
+  itemId: string;
+  categoryId: number | null;
+  name: string | null;
+  clicks: number;
+  cost: number;
+  orders: number;
+  revenue: number;
+}
+
+/** Upsert per-produktových denních faktů (source = heureka). Přepis dne je správný. */
+async function upsertProductFacts(
+  projectId: string,
+  byProduct: Map<string, ProductFactAgg>,
+): Promise<void> {
+  for (const p of byProduct.values()) {
+    const date = new Date(p.dayMs);
+    await prisma.productMetricFact.upsert({
+      where: {
+        projectId_source_date_itemId: {
+          projectId,
+          source: "heureka",
+          date,
+          itemId: p.itemId,
+        },
+      },
+      update: {
+        categoryId: p.categoryId,
+        name: p.name,
+        clicks: p.clicks,
+        cost: p.cost,
+        orders: p.orders,
+        revenue: p.revenue,
+      },
+      create: {
+        projectId,
+        source: "heureka",
+        date,
+        itemId: p.itemId,
+        categoryId: p.categoryId,
+        name: p.name,
+        clicks: p.clicks,
+        cost: p.cost,
+        orders: p.orders,
+        revenue: p.revenue,
+      },
+    });
+  }
+}
+
 /** Seznam dnů [start, end] (půlnoci UTC, inkluzivně), s pojistkou na max délku. */
 export function dayRange(start: Date, end: Date): Date[] {
   const days: Date[] = [];
@@ -151,21 +203,57 @@ export const heurekaAdapter: ConnectorAdapter = {
     start.setUTCDate(start.getUTCDate() - TRAILING_REFETCH_DAYS);
     const end = new Date();
 
-    // Agregace přes produkty na DENNÍ granularitu.
+    // Agregace přes produkty na DENNÍ granularitu (kanonika) + PER-PRODUKT vrstva.
     const byDay = new Map<number, Record<string, number>>();
+    // Klíč per-produkt = `${dayMs}|${itemId}`.
+    const byProduct = new Map<string, ProductFactAgg>();
     for (const day of dayRange(start, end)) {
       const rows = await fetchHeurekaConversions(apiKey, day);
       for (const row of rows) {
         const date = parseDateUtc(row.date) ?? toDay(day);
         const dayMs = date.getTime();
+        const cost = num(row.costs_without_vat?.total);
+        const clicks = num(row.visits?.total);
+        const orders = num(row.orders?.total);
+        const revenue = num(row.revenue?.total);
+
         const agg = byDay.get(dayMs) ?? {};
-        agg.cost = (agg.cost ?? 0) + num(row.costs_without_vat?.total);
-        agg.clicks = (agg.clicks ?? 0) + num(row.visits?.total);
-        agg.conversions = (agg.conversions ?? 0) + num(row.orders?.total);
-        agg.revenue = (agg.revenue ?? 0) + num(row.revenue?.total);
+        agg.cost = (agg.cost ?? 0) + cost;
+        agg.clicks = (agg.clicks ?? 0) + clicks;
+        agg.conversions = (agg.conversions ?? 0) + orders;
+        agg.revenue = (agg.revenue ?? 0) + revenue;
         byDay.set(dayMs, agg);
+
+        // Per-produkt: agreguj přes řádky téhož produktu/dne (různé click_source).
+        const itemId = (row.shop_item?.id ?? "").trim();
+        if (itemId) {
+          const pKey = `${dayMs}|${itemId}`;
+          const p =
+            byProduct.get(pKey) ??
+            ({
+              dayMs,
+              itemId,
+              categoryId: row.portal_category?.id ?? null,
+              name: row.shop_item?.name ?? null,
+              clicks: 0,
+              cost: 0,
+              orders: 0,
+              revenue: 0,
+            } satisfies ProductFactAgg);
+          p.clicks += clicks;
+          p.cost += cost;
+          p.orders += orders;
+          p.revenue += revenue;
+          if (p.categoryId == null && row.portal_category?.id != null)
+            p.categoryId = row.portal_category.id;
+          if (!p.name && row.shop_item?.name) p.name = row.shop_item.name;
+          byProduct.set(pKey, p);
+        }
       }
     }
+
+    // Per-produktová vrstva: upsert (přepis dne je správný — denní agregát je úplný).
+    await upsertProductFacts(connector.projectId, byProduct);
 
     // Tripwiry: první sync bez dat = chyba; inkrement bez dat = legitimní prázdno.
     if (byDay.size === 0) {
