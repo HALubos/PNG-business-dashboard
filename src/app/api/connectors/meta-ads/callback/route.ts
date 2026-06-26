@@ -8,20 +8,21 @@ import { getConnectorAdapter } from "@/core/connectors/registry";
 import { startConnectorSync } from "@/core/connectors/sync";
 import { canViewProject } from "@/core/projects/project-scope";
 import {
-  googleOAuthConfig,
-  decodeState,
-  exchangeCodeForTokens,
-} from "@/core/connectors/oauth/google";
+  metaOAuthConfig,
+  decodeMetaState,
+  exchangeCodeForToken,
+  exchangeForLongLivedToken,
+} from "@/core/connectors/oauth/meta";
 
-// GA4 OAuth callback — Google sem vrátí `code` + `state`. Vyměníme code za tokeny,
-// uložíme refresh_token + propertyId ŠIFROVANĚ do Connector.credentialsEnc a
-// spustíme backfill na pozadí. Pak zpět na /integrace.
+// Meta Ads OAuth callback — Meta sem vrátí `code` + `state`. Vyměníme code za
+// krátkodobý token, ten za DLOUHODOBÝ (~60 dní), uložíme token + adAccountId
+// ŠIFROVANĚ do Connector.credentialsEnc a spustíme backfill. Pak zpět na /integrace.
 
 const PROJECTS_VIEWALL = "admin.projects";
 
-interface Ga4State {
+interface MetaState {
   projectId: string;
-  propertyId: string;
+  adAccountId: string;
   klic: string;
 }
 
@@ -44,38 +45,40 @@ export async function GET(req: NextRequest) {
     return backToIntegrace(req, { oauth: "error" });
   }
 
-  let state: Ga4State;
+  let state: MetaState;
   try {
-    state = decodeState<Ga4State>(stateRaw);
+    state = decodeMetaState<MetaState>(stateRaw);
   } catch {
     return backToIntegrace(req, { oauth: "error" });
   }
 
-  const cfg = googleOAuthConfig();
-  if (!cfg) return backToIntegrace(req, { projekt: state.klic, oauth: "noconfig" });
+  const cfg = metaOAuthConfig();
+  if (!cfg) return backToIntegrace(req, { projekt: state.klic, oauth: "nometa" });
   if (!(await canViewProject(user, state.projectId, PROJECTS_VIEWALL))) {
     return new Response("K tomuto projektu nemáte přístup.", { status: 403 });
   }
 
   try {
-    const tokens = await exchangeCodeForTokens(cfg, code);
-    // refresh_token přijde jen při souhlasu s `prompt=consent` (vynuceno ve start).
-    if (!tokens.refresh_token) {
-      return backToIntegrace(req, { projekt: state.klic, oauth: "norefresh" });
+    const short = await exchangeCodeForToken(cfg, code);
+    const long = await exchangeForLongLivedToken(cfg, short.access_token);
+    if (!long.access_token) {
+      return backToIntegrace(req, { projekt: state.klic, oauth: "error" });
     }
 
-    const adapter = getConnectorAdapter("ga4")!;
+    const adapter = getConnectorAdapter("meta_ads")!;
+    const expiresAt = long.expires_in
+      ? new Date(Date.now() + long.expires_in * 1000).toISOString()
+      : null;
     const credentialsEnc = encryptJson({
-      refreshToken: tokens.refresh_token,
-      propertyId: state.propertyId,
+      accessToken: long.access_token,
+      adAccountId: state.adAccountId,
+      expiresAt,
     });
 
-    // Upsert dle (projectId, type): reconnect přepíše tokeny a NULUJE cursor →
-    // další sync backfilluje od začátku (stejná logika jako u url_feed connect).
-    // syncStatus se NEResetuje (viz `startConnectorSync` — přepis běžícího `processing`
-    // na `idle` by obešel zábor a spustil druhý souběžný sync).
+    // syncStatus se NEResetuje (viz `startConnectorSync` — přepis běžícího
+    // `processing` na `idle` by obešel zábor a spustil druhý souběžný sync).
     const connector = await prisma.connector.upsert({
-      where: { projectId_type: { projectId: state.projectId, type: "ga4" } },
+      where: { projectId_type: { projectId: state.projectId, type: "meta_ads" } },
       update: {
         credentialsEnc,
         active: true,
@@ -86,7 +89,7 @@ export async function GET(req: NextRequest) {
       },
       create: {
         projectId: state.projectId,
-        type: "ga4",
+        type: "meta_ads",
         kind: "oauth_api",
         nazev: adapter.nazev,
         credentialsEnc,
@@ -99,11 +102,10 @@ export async function GET(req: NextRequest) {
         userId: user.id,
         akce: "connector.connect",
         entita: `Connector:${connector.id}`,
-        detail: { type: "ga4", projectId: state.projectId },
+        detail: { type: "meta_ads", projectId: state.projectId },
       },
     });
 
-    // Spustí backfill/sync na pozadí (UI pollu­je stav u karty).
     await startConnectorSync(connector.id);
 
     return backToIntegrace(req, { projekt: state.klic, oauth: "ok" });

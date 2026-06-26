@@ -11,17 +11,19 @@ import {
   googleOAuthConfig,
   decodeState,
   exchangeCodeForTokens,
+  GOOGLE_ADS_CALLBACK_PATH,
 } from "@/core/connectors/oauth/google";
 
-// GA4 OAuth callback — Google sem vrátí `code` + `state`. Vyměníme code za tokeny,
-// uložíme refresh_token + propertyId ŠIFROVANĚ do Connector.credentialsEnc a
-// spustíme backfill na pozadí. Pak zpět na /integrace.
+// Google Ads OAuth callback — Google sem vrátí `code` + `state`. Vyměníme code za
+// tokeny, uložíme refresh_token + customerId ŠIFROVANĚ do Connector.credentialsEnc
+// a spustíme backfill na pozadí. Pak zpět na /integrace. (Vzor: GA4 callback.)
 
 const PROJECTS_VIEWALL = "admin.projects";
 
-interface Ga4State {
+interface GoogleAdsState {
   projectId: string;
-  propertyId: string;
+  customerId: string;
+  loginCustomerId?: string;
   klic: string;
 }
 
@@ -44,14 +46,14 @@ export async function GET(req: NextRequest) {
     return backToIntegrace(req, { oauth: "error" });
   }
 
-  let state: Ga4State;
+  let state: GoogleAdsState;
   try {
-    state = decodeState<Ga4State>(stateRaw);
+    state = decodeState<GoogleAdsState>(stateRaw);
   } catch {
     return backToIntegrace(req, { oauth: "error" });
   }
 
-  const cfg = googleOAuthConfig();
+  const cfg = googleOAuthConfig(GOOGLE_ADS_CALLBACK_PATH);
   if (!cfg) return backToIntegrace(req, { projekt: state.klic, oauth: "noconfig" });
   if (!(await canViewProject(user, state.projectId, PROJECTS_VIEWALL))) {
     return new Response("K tomuto projektu nemáte přístup.", { status: 403 });
@@ -64,18 +66,19 @@ export async function GET(req: NextRequest) {
       return backToIntegrace(req, { projekt: state.klic, oauth: "norefresh" });
     }
 
-    const adapter = getConnectorAdapter("ga4")!;
+    const adapter = getConnectorAdapter("google_ads")!;
     const credentialsEnc = encryptJson({
       refreshToken: tokens.refresh_token,
-      propertyId: state.propertyId,
+      customerId: state.customerId,
+      loginCustomerId: state.loginCustomerId,
     });
 
     // Upsert dle (projectId, type): reconnect přepíše tokeny a NULUJE cursor →
-    // další sync backfilluje od začátku (stejná logika jako u url_feed connect).
+    // další sync backfilluje od začátku (stejná logika jako u GA4 / url_feed connect).
     // syncStatus se NEResetuje (viz `startConnectorSync` — přepis běžícího `processing`
     // na `idle` by obešel zábor a spustil druhý souběžný sync).
     const connector = await prisma.connector.upsert({
-      where: { projectId_type: { projectId: state.projectId, type: "ga4" } },
+      where: { projectId_type: { projectId: state.projectId, type: "google_ads" } },
       update: {
         credentialsEnc,
         active: true,
@@ -86,7 +89,7 @@ export async function GET(req: NextRequest) {
       },
       create: {
         projectId: state.projectId,
-        type: "ga4",
+        type: "google_ads",
         kind: "oauth_api",
         nazev: adapter.nazev,
         credentialsEnc,
@@ -99,7 +102,7 @@ export async function GET(req: NextRequest) {
         userId: user.id,
         akce: "connector.connect",
         entita: `Connector:${connector.id}`,
-        detail: { type: "ga4", projectId: state.projectId },
+        detail: { type: "google_ads", projectId: state.projectId },
       },
     });
 

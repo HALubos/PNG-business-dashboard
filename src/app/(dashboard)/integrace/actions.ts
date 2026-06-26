@@ -9,6 +9,7 @@ import type { ConnectorType } from "@/generated/prisma/client";
 import { getConnectorAdapter } from "@/core/connectors/registry";
 import { canViewProject } from "@/core/projects/project-scope";
 import { startConnectorSync } from "@/core/connectors/sync";
+import { encryptJson } from "@/core/connectors/crypto";
 
 const CONNECTORS_PERM = "admin.connectors";
 const PROJECTS_VIEWALL = "admin.projects";
@@ -84,6 +85,66 @@ export async function connectConnectorAction(
   });
 
   // Spustí backfill/sync na pozadí (dry-run v této dávce).
+  await startConnectorSync(connector.id);
+
+  revalidatePath("/integrace");
+  return { ok: true };
+}
+
+/**
+ * Připojí Sklik konektor API tokenem. Sklik je TOKEN-BASED (ne OAuth roundtrip),
+ * proto se připojuje server akcí (ne redirectem): token (+ volitelně userId účtu)
+ * uložíme ŠIFROVANĚ do credentialsEnc. Cursor se NULUJE (reconnect = nový backfill).
+ */
+export async function connectSklikAction(
+  _prev: ConnectorActionState,
+  formData: FormData,
+): Promise<ConnectorActionState> {
+  const projectId = String(formData.get("projectId") ?? "");
+
+  const { user, error } = await assertCanManage(projectId);
+  if (error) return { error };
+
+  const apiToken = String(formData.get("apiToken") ?? "").trim();
+  if (!apiToken) return { error: "Zadejte Sklik API token." };
+  const accountId = String(formData.get("accountId") ?? "").trim() || undefined;
+
+  const adapter = getConnectorAdapter("sklik");
+  if (!adapter) return { error: "Neznámý typ konektoru." };
+
+  const credentialsEnc = encryptJson({ apiToken, accountId });
+  // POZN.: syncStatus se zde NEResetuje — kdyby konektor zrovna běžel (`processing`),
+  // přepis na `idle` by obešel atomický zábor `claimConnector` a spustil druhý
+  // souběžný sync. Stav řeší až `startConnectorSync` (claim z jakéhokoli ne-processing).
+  const connector = await prisma.connector.upsert({
+    where: { projectId_type: { projectId, type: "sklik" } },
+    update: {
+      credentialsEnc,
+      active: true,
+      nazev: adapter.nazev,
+      feedUrl: null,
+      cursor: null,
+      lastError: null,
+    },
+    create: {
+      projectId,
+      type: "sklik",
+      kind: "oauth_api",
+      nazev: adapter.nazev,
+      credentialsEnc,
+      active: true,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user!.id,
+      akce: "connector.connect",
+      entita: `Connector:${connector.id}`,
+      detail: { type: "sklik", projectId },
+    },
+  });
+
   await startConnectorSync(connector.id);
 
   revalidatePath("/integrace");
