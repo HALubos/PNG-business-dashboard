@@ -168,6 +168,15 @@ export async function connectHeurekaAction(
 
   const apiKey = String(formData.get("apiKey") ?? "").trim();
   if (!apiKey) return { error: "Zadejte Heureka API klíč." };
+  // Klíč je krátký ASCII token (jde do HTTP hlavičky x-heureka-api-key). Odmítni
+  // zjevně chybný vstop (mezery/nové řádky/diakritika/nesmyslná délka) hned tady —
+  // jinak by to spadlo až v syncu na „Cannot convert argument to a ByteString".
+  if (apiKey.length > 200 || /\s/.test(apiKey) || /[^\x21-\x7e]/.test(apiKey)) {
+    return {
+      error:
+        "Neplatný Heureka API klíč — má to být krátký token bez mezer a diakritiky (zkontrolujte, zda jste nevložili jiný text).",
+    };
+  }
   const catalogUrl = String(formData.get("catalogUrl") ?? "").trim() || null;
 
   const adapter = getConnectorAdapter("heureka");
