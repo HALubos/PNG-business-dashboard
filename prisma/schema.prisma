@@ -269,6 +269,7 @@ enum ConnectorType {
   google_ads
   sklik
   ga4
+  heureka
 }
 
 // Stav synchronizace (vzor jako Reseller.feedStatus).

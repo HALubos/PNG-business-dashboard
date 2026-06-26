@@ -151,6 +151,66 @@ export async function connectSklikAction(
   return { ok: true };
 }
 
+/**
+ * Připojí Heureka konektor API klíčem. Heureka je TOKEN-BASED (jako Sklik): klíč
+ * uložíme ŠIFROVANĚ do credentialsEnc. Volitelná URL katalogového XML feedu (cena/
+ * kategorie/dostupnost pro bidding) se ukládá do `feedUrl` (není to secret). Cursor
+ * se NULUJE (reconnect = nový backfill).
+ */
+export async function connectHeurekaAction(
+  _prev: ConnectorActionState,
+  formData: FormData,
+): Promise<ConnectorActionState> {
+  const projectId = String(formData.get("projectId") ?? "");
+
+  const { user, error } = await assertCanManage(projectId);
+  if (error) return { error };
+
+  const apiKey = String(formData.get("apiKey") ?? "").trim();
+  if (!apiKey) return { error: "Zadejte Heureka API klíč." };
+  const catalogUrl = String(formData.get("catalogUrl") ?? "").trim() || null;
+
+  const adapter = getConnectorAdapter("heureka");
+  if (!adapter) return { error: "Neznámý typ konektoru." };
+
+  const credentialsEnc = encryptJson({ apiKey });
+  // POZN.: syncStatus se zde NEResetuje (viz connectSklikAction) — zábor řeší startConnectorSync.
+  const connector = await prisma.connector.upsert({
+    where: { projectId_type: { projectId, type: "heureka" } },
+    update: {
+      credentialsEnc,
+      active: true,
+      nazev: adapter.nazev,
+      feedUrl: catalogUrl,
+      cursor: null,
+      lastError: null,
+    },
+    create: {
+      projectId,
+      type: "heureka",
+      kind: "oauth_api",
+      nazev: adapter.nazev,
+      credentialsEnc,
+      feedUrl: catalogUrl,
+      active: true,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user!.id,
+      akce: "connector.connect",
+      entita: `Connector:${connector.id}`,
+      detail: { type: "heureka", projectId },
+    },
+  });
+
+  await startConnectorSync(connector.id);
+
+  revalidatePath("/integrace");
+  return { ok: true };
+}
+
 /** Odpojí konektor a smaže jeho metriky (per projekt+zdroj). */
 export async function disconnectConnectorAction(
   _prev: ConnectorActionState,
